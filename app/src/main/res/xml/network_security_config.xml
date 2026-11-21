@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The controller's dashboard is plain HTTP at whatever IP the cloud reports (192.168.42.1 on its own Wi-Fi,
+     but it can differ), and this config cannot match IP ranges. The cloud API is a hardcoded https:// URL. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">OnlyHeat</string>
+    <string name="channel_setpoints">Promjene temperature</string>
+    <string name="channel_alerts">Upozorenja grijanja</string>
+    <string name="widget_description">Temperature soba s brzim podešavanjem cilja</string>
+    <string name="widget_log_in">Otvorite OnlyHeat za prijavu.</string>
+    <string name="widget_failed">Poslužitelj nije dostupan. Dodirnite za otvaranje aplikacije.</string>
+    <string name="widget_write_failed">Temperatura nije promijenjena. Provjerite vezu.</string>
+    <string name="widget_no_rooms">Nema soba.</string>
+    <string name="widget_more">još %1$d</string>
+</resources>

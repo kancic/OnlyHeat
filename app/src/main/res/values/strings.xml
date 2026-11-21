@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">OnlyHeat</string>
+    <string name="channel_setpoints">Temperature changes</string>
+    <string name="channel_alerts">Heating alerts</string>
+    <string name="widget_description">Room temperatures with quick target controls</string>
+    <string name="widget_log_in">Open OnlyHeat to log in.</string>
+    <string name="widget_failed">Can\'t reach the server. Tap to open the app.</string>
+    <string name="widget_write_failed">Couldn\'t change the temperature. Check your connection.</string>
+    <string name="widget_no_rooms">No rooms.</string>
+    <string name="widget_more">+%1$d more</string>
+</resources>

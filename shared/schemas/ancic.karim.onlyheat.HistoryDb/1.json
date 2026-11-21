@@ -1,0 +1,48 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "52deb3968aadc0f44f53c3cd52d194cb",
+    "entities": [
+      {
+        "tableName": "Reading",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`roomId` TEXT NOT NULL, `time` INTEGER NOT NULL, `measured` REAL, `target` REAL, PRIMARY KEY(`roomId`, `time`))",
+        "fields": [
+          {
+            "fieldPath": "roomId",
+            "columnName": "roomId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "time",
+            "columnName": "time",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "measured",
+            "columnName": "measured",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "target",
+            "columnName": "target",
+            "affinity": "REAL"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "roomId",
+            "time"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '52deb3968aadc0f44f53c3cd52d194cb')"
+    ]
+  }
+}
