@@ -11,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
+import androidx.core.view.WindowCompat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
@@ -59,10 +60,16 @@ class MainActivity : ComponentActivity() {
                         checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
                     ) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
                 },
-            ) { dark ->
-                if (Build.VERSION.SDK_INT < 31) null
-                else if (dark) dynamicDarkColorScheme(this) else dynamicLightColorScheme(this)
-            }
+                dynamicScheme = { dark ->
+                    if (Build.VERSION.SDK_INT < 31) null
+                    else if (dark) dynamicDarkColorScheme(this) else dynamicLightColorScheme(this)
+                },
+                statusBarOnDark = { onDark ->
+                    // false restores what enableEdgeToEdge picked: dark icons in light mode, light in dark mode.
+                    WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars =
+                        !onDark && !resources.configuration.isNightModeActive
+                },
+            )
         }
     }
 

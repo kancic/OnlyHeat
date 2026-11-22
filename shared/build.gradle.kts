@@ -78,6 +78,13 @@ compose.desktop.application {
         macOS {
             iconFile.set(rootProject.file("icons/onlyheat.icns"))
             bundleID = "ancic.karim.onlyheat"
+            // Without this macOS silently blocks reaching the controller on the home network (Local Network privacy).
+            infoPlist {
+                extraKeysRawXml = """
+                    <key>NSLocalNetworkUsageDescription</key>
+                    <string>OnlyHeat talks to your heating controller on your home network to restart it and edit its schedule.</string>
+                """.trimIndent()
+            }
         }
     }
 }

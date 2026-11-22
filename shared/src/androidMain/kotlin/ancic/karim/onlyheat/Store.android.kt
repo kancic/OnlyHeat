@@ -5,6 +5,7 @@ import androidx.room3.Room
 import androidx.room3.RoomDatabase
 
 private lateinit var appContext: Context
+internal fun androidContextOrNull(): Context? = if (::appContext.isInitialized) appContext else null
 
 /** Call before touching [history] from any Android entry point (activity, worker). */
 fun initHistory(context: Context) { appContext = context.applicationContext }

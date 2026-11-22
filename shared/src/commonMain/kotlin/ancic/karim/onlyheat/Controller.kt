@@ -4,7 +4,9 @@ import ancic.karim.onlyheat.res.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -12,12 +14,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.russhwolf.settings.Settings
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 
@@ -34,17 +40,39 @@ fun ControllerTab(
     var restartAfterPin by remember { mutableStateOf(false) }
     var confirmRestart by remember { mutableStateOf(false) }
     var restarting by remember { mutableStateOf(false) }
+    val controllerPicker = remember { LanControllerPicker(settings) }
+    var savedController by remember { mutableStateOf(settings.savedLanTarget()?.name) }
+    var choosing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    /** Saves the picked controller once its page shows the picked name. null: the user cancelled. */
+    suspend fun chooseController(): Boolean? = attempt { controllerPicker.find(host, change = true) }
+        .also { savedController = settings.savedLanTarget()?.name }
+        .fold({ if (it == null) null else true }, { false })
+
     fun restart() {
-        val p = pin ?: run { restartAfterPin = true; askPin = true; return }
+        val p = pin ?: run {
+            // The controller first, then its PIN.
+            restarting = true
+            scope.launch {
+                try {
+                    if (!requestLocalNetwork()) snackbar.showSnackbar(getString(Res.string.local_permission_denied))
+                    else attempt { controllerPicker.find(host) }
+                        .onSuccess { if (it != null) { savedController = settings.savedLanTarget()?.name; restartAfterPin = true; askPin = true } }
+                        .onFailure { snackbar.showSnackbar(errorText(it)) }
+                } finally {
+                    restarting = false
+                }
+            }
+            return
+        }
         restarting = true
         scope.launch {
             try {
                 if (!requestLocalNetwork()) {
                     snackbar.showSnackbar(getString(Res.string.local_permission_denied)); return@launch
                 }
-                val back = LocalApi(host, p).use { it.rebootAndWait { cloudStatus() == null } }
+                val back = LocalApi(host, p, settings) { controllerPicker.ask() }.rebootAndWait { cloudStatus() == null }
                 snackbar.showSnackbar(getString(if (back) Res.string.restart_done else Res.string.restart_timeout))
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -62,7 +90,7 @@ fun ControllerTab(
         topBar = {
             LargeFlexibleTopAppBar(
                 title = { Text(stringResource(Res.string.tab_controller)) },
-                subtitle = { Text(listOfNotNull(device, host).joinToString(" · ")) },
+                subtitle = { if (device != null) Text(device) },
                 scrollBehavior = scroll,
             )
         },
@@ -78,7 +106,9 @@ fun ControllerTab(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            DiagnosticsCard(Modifier.springIn(0), host, requestLocalNetwork, cloudStatus, restarting) { confirmRestart = true }
+            DiagnosticsCard(Modifier.springIn(0), host, settings, ::chooseController, requestLocalNetwork, cloudStatus, restarting) {
+                confirmRestart = true
+            }
 
             if (backgroundAlerts != null) AlertsCard(Modifier.springIn(1), settings, backgroundAlerts)
 
@@ -103,7 +133,29 @@ fun ControllerTab(
                 }
             }
 
-            Section(stringResource(Res.string.account), stringResource(Res.string.account_desc), modifier = Modifier.springIn(5)) {
+            Section(
+                stringResource(Res.string.lan_controller_title),
+                savedController ?: stringResource(Res.string.pin_not_set),
+                modifier = Modifier.springIn(5),
+            ) {
+                TextButton({
+                    choosing = true
+                    scope.launch {
+                        try {
+                            when {
+                                !requestLocalNetwork() -> snackbar.showSnackbar(getString(Res.string.local_permission_denied))
+                                chooseController() == false -> snackbar.showSnackbar(getString(Res.string.schedule_unreachable))
+                            }
+                        } finally {
+                            choosing = false
+                        }
+                    }
+                }, enabled = !choosing && !restarting, shapes = ButtonDefaults.shapes()) {
+                    Text(stringResource(Res.string.change))
+                }
+            }
+
+            Section(stringResource(Res.string.account), stringResource(Res.string.account_desc), modifier = Modifier.springIn(6)) {
                 OutlinedButton(onLogout, shapes = ButtonDefaults.shapes()) { Text(stringResource(Res.string.log_out)) }
             }
           }
@@ -120,7 +172,7 @@ fun ControllerTab(
         },
         dismissButton = { TextButton({ confirmRestart = false }) { Text(stringResource(Res.string.cancel)) } },
     )
-    if (restarting) AlertDialog(
+    if (restarting && !controllerPicker.isOpen) AlertDialog(
         onDismissRequest = {}, // not dismissable: wait for the controller to come back
         confirmButton = {},
         icon = { LoadingIndicator() },
@@ -134,6 +186,115 @@ fun ControllerTab(
             if (restartAfterPin) restart()
         },
     )
+    controllerPicker.Dialog(host)
+}
+
+internal class LanControllerPicker(private val settings: Settings) {
+    private data class Prompt(val answer: CompletableDeferred<DashboardTarget?>, val homeNetworkFirst: Boolean)
+
+    private val requests = Mutex()
+    private var pending by mutableStateOf<Prompt?>(null)
+    val isOpen get() = pending != null
+
+    suspend fun ask(homeNetworkFirst: Boolean = false): DashboardTarget? = requests.withLock {
+        val answer = CompletableDeferred<DashboardTarget?>()
+        pending = Prompt(answer, homeNetworkFirst)
+        try {
+            answer.await()
+        } finally {
+            pending = null
+        }
+    }
+
+    /**
+     * The controller to use, found before any PIN is asked for: the saved one or the hotspot when either answers,
+     * otherwise the one the user picks by name ([change] always asks). Saved when [save], so the dashboard login goes
+     * there. null: the user cancelled. Throws [ControllerUnreachable] when the picked one doesn't answer as itself.
+     */
+    suspend fun find(hotspot: String, change: Boolean = false, save: Boolean = true): DashboardTarget? {
+        val found = (if (change) null else resolveDashboard(hotspot, settings)?.first) ?: run {
+            val chosen = ask(homeNetworkFirst = true) ?: return null
+            resolveDashboard(hotspot, settings, selected = chosen)?.first ?: throw ControllerUnreachable(null)
+        }
+        if (save) settings.rememberLanTarget(found, hotspot)
+        return found
+    }
+
+    @Composable
+    fun Dialog(hotspot: String) {
+        val (answer, homeNetworkFirst) = pending ?: return
+        val savedName = remember(answer) { settings.savedLanTarget()?.name }
+        var useHomeNetwork by remember(answer) { mutableStateOf(homeNetworkFirst || savedName != null) }
+        var discovered by remember(answer, hotspot) { mutableStateOf(emptyList<DashboardTarget>()) }
+        var wifiNames by remember(answer, hotspot) { mutableStateOf(emptyMap<String, String>()) } // by host
+        var searching by remember(answer, hotspot) { mutableStateOf(false) }
+        // Leaving the home-network page cancels the scan; coming back scans again (e.g. the controller finished booting).
+        if (useHomeNetwork) LaunchedEffect(answer, hotspot) {
+            discovered = emptyList()
+            searching = true
+            val connection = currentLanConnection()
+            dashboardProbeClient(connection).use { client ->
+                client.findNamedDashboards(hotspot) { found, wifi ->
+                    if (wifi != null) wifiNames += found.host to wifi
+                    discovered = (discovered + found.copy(connectionId = connection?.id)).sortedBy { t -> t.name }
+                }
+            }
+            searching = false
+        }
+        val canGoBack = useHomeNetwork && !homeNetworkFirst
+        val goBack: () -> Unit = {
+            if (canGoBack) {
+                useHomeNetwork = false
+            } else {
+                answer.complete(null)
+            }
+        }
+        AlertDialog(
+            onDismissRequest = goBack,
+            title = {
+                Text(stringResource(if (useHomeNetwork) Res.string.lan_devices_title else Res.string.controller_wifi_title))
+            },
+            text = {
+                Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (useHomeNetwork) {
+                        val matches = discovered.groupBy { it.name }.values.sortedBy { it.first().name != savedName }
+                        if (searching) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        when {
+                            matches.isEmpty() && searching -> Text(stringResource(Res.string.lan_address_searching))
+                            matches.isEmpty() -> Text(stringResource(Res.string.lan_no_named_devices))
+                            else -> {
+                                Text(stringResource(Res.string.lan_match_wifi_name))
+                                matches.forEach { sameName ->
+                                    val target = sameName.first()
+                                    val label = wifiNames[target.host]?.let { "$it (${target.name})" } ?: target.name.orEmpty()
+                                    when {
+                                        sameName.size > 1 -> Text(stringResource(Res.string.lan_duplicate_name, target.name.orEmpty()))
+                                        target.name == savedName -> Button({ answer.complete(target) }) { Text(label) }
+                                        else -> OutlinedButton({ answer.complete(target) }) { Text(label) }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Text(stringResource(Res.string.controller_wifi_desc))
+                        TextButton({ useHomeNetwork = true }) {
+                            Text(stringResource(Res.string.use_home_wifi))
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                if (!useHomeNetwork) {
+                    Button({ answer.complete(DashboardTarget(hotspot, savedName)) }) { Text(stringResource(Res.string.retry)) }
+                }
+            },
+            dismissButton = {
+                TextButton(goBack) {
+                    Text(stringResource(if (canGoBack) Res.string.back else Res.string.cancel))
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -197,16 +358,11 @@ private fun PinDialog(onDismiss: () -> Unit, onPin: (String) -> Unit) {
     )
 }
 
-private enum class Link { Unknown, Ok, Down, NoInternet }
-
-/**
- * Checks both paths to the controller and says what that means:
- * cloud ok → fine; cloud down but local ok → only the cloud link is stuck (restart helps);
- * both down → frozen (breaker) or the phone is simply not on the controller's Wi-Fi.
- */
+private enum class Link { Unknown, Ok, Unverified, Down, NoInternet }
 @Composable
 private fun DiagnosticsCard(
-    modifier: Modifier, host: String, requestLocalNetwork: suspend () -> Boolean, cloudStatus: suspend () -> Throwable?,
+    modifier: Modifier, host: String, settings: Settings, chooseController: suspend () -> Boolean?,
+    requestLocalNetwork: suspend () -> Boolean, cloudStatus: suspend () -> Throwable?,
     restarting: Boolean, onRestart: () -> Unit,
 ) {
     var cloud by remember { mutableStateOf(Link.Unknown) }
@@ -226,10 +382,33 @@ private fun DiagnosticsCard(
                         else -> Link.Down
                     }
                 }
-                launch { local = if (requestLocalNetwork() && controllerAnswers(host)) Link.Ok else Link.Down }
+                launch {
+                    local = when {
+                        !requestLocalNetwork() -> Link.Down
+                        resolveDashboard(host, settings) != null -> Link.Ok
+                        dashboardProbeClient().use { it.findLanDashboard(host) } != null -> Link.Unverified
+                        else -> Link.Down
+                    }
+                }
             }
             log("diagnostics: cloud=$cloud local=$local ($host)")
             running = false
+        }
+    }
+
+    fun pickController() {
+        running = true
+        scope.launch {
+            try {
+                if (!requestLocalNetwork()) {
+                    local = Link.Down
+                    return@launch
+                }
+                val found = chooseController() ?: return@launch
+                local = if (found) Link.Ok else Link.Down
+            } finally {
+                running = false
+            }
         }
     }
 
@@ -239,17 +418,22 @@ private fun DiagnosticsCard(
         below = {
             if (cloud != Link.Unknown) {
                 LinkRow(stringResource(Res.string.diag_cloud), cloud)
-                LinkRow(stringResource(Res.string.diag_local), local)
+                LinkRow(
+                    stringResource(Res.string.diag_local), local,
+                    onClick = if (local == Link.Unverified && !running && !restarting) ::pickController else null,
+                )
                 val verdict = when {
                     cloud == Link.NoInternet -> Res.string.diag_verdict_no_internet
+                    local == Link.Unverified -> Res.string.diag_verdict_unverified
                     cloud == Link.Ok && local == Link.Ok -> Res.string.diag_verdict_ok
                     cloud == Link.Ok -> Res.string.diag_verdict_ok_remote
                     local == Link.Ok -> Res.string.diag_verdict_cloud_link
                     else -> Res.string.diag_verdict_nothing
                 }
                 Text(stringResource(verdict), style = MaterialTheme.typography.bodyLarge)
-                if (cloud == Link.Down && local == Link.Ok) FilledTonalButton(
-                    onRestart, enabled = !restarting, shapes = ButtonDefaults.shapes(),
+                // Unverified too: the restart asks which controller it is.
+                if (cloud == Link.Down && local in setOf(Link.Ok, Link.Unverified)) FilledTonalButton(
+                    onRestart, enabled = !restarting && !running, shapes = ButtonDefaults.shapes(),
                 ) { Text(stringResource(Res.string.restart)) }
             }
         },
@@ -260,7 +444,7 @@ private fun DiagnosticsCard(
 }
 
 @Composable
-private fun LinkRow(label: String, state: Link) {
+private fun LinkRow(label: String, state: Link, onClick: (() -> Unit)? = null) {
     val ok = state == Link.Ok
     Row(verticalAlignment = Alignment.CenterVertically) {
         // Expressive status shapes: a soft cookie when fine, a spiky burst when not.
@@ -272,10 +456,16 @@ private fun LinkRow(label: String, state: Link) {
         )
         Spacer(Modifier.width(10.dp))
         Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        Text(
-            stringResource(if (ok) Res.string.diag_ok else Res.string.diag_fail),
-            style = MaterialTheme.typography.labelLarge,
-        )
+        val status = stringResource(when (state) {
+            Link.Ok -> Res.string.diag_ok
+            Link.Unverified -> Res.string.diag_unverified
+            else -> Res.string.diag_fail
+        })
+        if (onClick != null) {
+            TextButton(onClick) { Text(status, textDecoration = TextDecoration.Underline) }
+        } else {
+            Text(status, style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 
@@ -287,14 +477,19 @@ internal fun savePin(s: Settings, pin: String?) = if (pin == null) s.remove("loc
 
 /** Masked, digits-only field for the dashboard PIN. */
 @Composable
-internal fun PinField(value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, error: String? = null) {
+internal fun PinField(
+    value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, error: String? = null, label: String? = null,
+    onDone: (() -> Unit)? = null, // the keyboard's done key
+) {
     OutlinedTextField(
         value, { v -> onChange(v.filter(Char::isDigit).take(PIN_LENGTH)) },
+        label = label?.let { { Text(it) } },
         singleLine = true,
         isError = error != null,
         supportingText = error?.let { { Text(it) } },
         visualTransformation = PasswordVisualTransformation(),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = onDone?.let { f -> { f() } }),
         shape = MaterialTheme.shapes.large,
         modifier = modifier,
     )

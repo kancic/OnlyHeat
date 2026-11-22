@@ -2,13 +2,19 @@
 <resources>
     <string name="login_intro">Connect with the API PIN of your TTO heating controller.</string>
     <string name="pin_where">Where to find the PIN</string>
-    <string name="pin_step1">1. Connect your phone to the Wi-Fi network of the controller itself.</string>
-    <string name="pin_step2">2. Open http://192.168.42.1/dashboard in a browser.</string>
-    <string name="pin_step3">3. Go to SETUP → API PIN and copy the PIN shown there.</string>
-    <string name="pin_step4">4. Switch back to your normal Wi-Fi and enter the PIN below.</string>
+    <string name="pin_step1">Connect your phone to the Wi-Fi network of the controller itself.</string>
+    <string name="pin_step2">Open http://192.168.42.1/dashboard in a browser.</string>
+    <string name="pin_step3">Go to SETUP → API PIN and copy the PIN shown there.</string>
+    <string name="pin_step4">Switch back to your normal Wi-Fi and enter the PIN below.</string>
     <string name="pin_label">Device PIN</string>
     <string name="pin_wrong">No controller found for this PIN.</string>
     <string name="connect">Connect</string>
+    <string name="pin_from_controller">Get the PIN from the controller</string>
+    <string name="pin_enter">I have the API PIN</string>
+    <string name="ctrl_how">How it works</string>
+    <string name="ctrl_step1">Be on your home Wi-Fi or on the controller’s own Wi-Fi.</string>
+    <string name="ctrl_step2">Find your controller and pick it by name.</string>
+    <string name="ctrl_step3">Enter its 4-digit dashboard PIN. OnlyHeat reads the API PIN and signs you in.</string>
     <string name="server_unreachable">The heating server is not responding. Try again.</string>
     <string name="failed">Something went wrong.</string>
     <string name="history">History</string>
@@ -59,8 +65,8 @@
     <string name="back">Back</string>
     <string name="schedule_title">Schedule</string>
     <string name="schedule_desc">While an entry is active, the room holds its temperature and ignores manual and smart settings.</string>
-    <string name="schedule_local_only">The schedule can only be edited while your phone is connected to the Wi-Fi of the controller.</string>
-    <string name="schedule_unreachable">Cannot reach the controller at %1$s.</string>
+    <string name="schedule_local_only">The schedule can only be edited while your phone is on the Wi-Fi of the controller, or on the home Wi-Fi the controller is connected to.</string>
+    <string name="schedule_unreachable">Cannot reach the controller. Check your Wi-Fi connection and try again.</string>
     <string name="schedule_empty">No schedule entries. Rooms use the temperatures set in the app.</string>
     <string name="schedule_saved">Schedule saved</string>
     <string name="add_entry">Add entry</string>
@@ -81,6 +87,7 @@
     <string name="dashboard_pin">Dashboard PIN</string>
     <string name="dashboard_pin_desc">The 4-digit PIN you use to log in at http://192.168.42.1/dashboard.</string>
     <string name="wrong_dashboard_pin">Wrong dashboard PIN.</string>
+    <string name="no_api_pin">The controller's Setup page shows no API PIN.</string>
     <string name="local_permission_denied">OnlyHeat needs local network access to reach the controller.</string>
     <string name="restart">Restart</string>
     <string name="restart_title">Restart the controller?</string>
@@ -88,13 +95,13 @@
     <string name="restarting">Restarting the controller…</string>
     <string name="restarting_hint">If your phone switches to another Wi-Fi meanwhile, connect it back to the controller.</string>
     <string name="restart_done">Controller restarted</string>
-    <string name="restart_timeout">The controller has not come back yet. Give it a few more minutes.</string>
+    <string name="restart_timeout">The app could not confirm that the controller came back. Check its connection and try diagnostics again.</string>
     <string name="tab_rooms">Rooms</string>
     <string name="tab_controller">Controller</string>
     <string name="schedule_card_desc">Set when each room holds a fixed temperature.</string>
     <string name="restart_card_title">Restart controller</string>
     <string name="restart_card_desc">Use this when the controller stops responding, instead of switching it off at the breaker.</string>
-    <string name="controller_local_only">Schedule and restart work only while your phone is on the Wi-Fi of the controller.</string>
+    <string name="controller_local_only">Schedule and restart work only while your phone is on the Wi-Fi of the controller, or on the home Wi-Fi the controller is connected to.</string>
     <string name="pin_saved">Saved</string>
     <string name="pin_not_set">Not set</string>
     <string name="change">Change</string>
@@ -104,13 +111,24 @@
     <string name="diag_desc">Run this when the app cannot reach your heating.</string>
     <string name="diag_run">Check</string>
     <string name="diag_cloud">Cloud → controller</string>
-    <string name="diag_local">Phone → controller (its Wi-Fi)</string>
+    <string name="diag_local">Phone → controller (local network)</string>
     <string name="diag_ok">Reachable</string>
     <string name="diag_fail">Not reachable</string>
     <string name="diag_verdict_ok">Everything works.</string>
-    <string name="diag_verdict_ok_remote">The controller is online. You only need its Wi-Fi for the schedule and restarting.</string>
+    <string name="diag_verdict_ok_remote">The controller is online. You only need to be on its Wi-Fi or your home Wi-Fi for the schedule and restarting.</string>
     <string name="diag_verdict_cloud_link">The controller is running, but its connection to the cloud is down. Restarting it should fix this.</string>
-    <string name="diag_verdict_nothing">Neither the cloud nor your phone can reach the controller. If your phone is on the Wi-Fi of the controller, it is probably frozen: switch it off and on at the breaker. Otherwise, connect to its Wi-Fi and check again.</string>
+    <string name="diag_verdict_nothing">The app could not reach the controller through the cloud or the local addresses it checked. Connect to the controller’s own Wi-Fi and check again.</string>
+    <string name="diag_unverified">Unverified dashboard</string>
+    <string name="diag_verdict_unverified">Tap “Unverified dashboard” and choose your controller by name.</string>
+    <string name="controller_wifi_title">Connect to the controller’s Wi-Fi</string>
+    <string name="controller_wifi_desc">Join the controller’s network in Wi-Fi settings, then tap Retry. If prompted about no internet, stay connected.</string>
+    <string name="use_home_wifi">Use home Wi-Fi instead</string>
+    <string name="lan_address_searching">Looking for controllers…</string>
+    <string name="lan_controller_title">Home Wi-Fi controller</string>
+    <string name="lan_devices_title">Choose your controller</string>
+    <string name="lan_match_wifi_name">Choose your controller by its Wi-Fi name.</string>
+    <string name="lan_no_named_devices">No named controllers found. Try the controller’s own Wi-Fi.</string>
+    <string name="lan_duplicate_name">More than one controller reports %1$s. Connect to its own Wi-Fi to tell them apart.</string>
     <string name="diag_verdict_no_internet">Your phone cannot reach the TTO cloud. Check its internet connection.</string>
     <string name="away_title">Away</string>
     <string name="away_go">Go away</string>
@@ -139,4 +157,6 @@
         <item quantity="one">%1$d room</item>
         <item quantity="other">%1$d rooms</item>
     </plurals>
+    <string name="ctrl_find">Find my controller</string>
+    <string name="ctrl_on_hotspot">On the controller’s Wi-Fi</string>
 </resources>

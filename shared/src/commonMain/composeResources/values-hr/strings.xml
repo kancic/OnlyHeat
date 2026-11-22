@@ -2,13 +2,19 @@
 <resources>
     <string name="login_intro">Povežite se pomoću API PIN-a vašeg TTO regulatora grijanja.</string>
     <string name="pin_where">Gdje pronaći PIN</string>
-    <string name="pin_step1">1. Spojite mobitel na Wi-Fi mrežu samog regulatora.</string>
-    <string name="pin_step2">2. U pregledniku otvorite http://192.168.42.1/dashboard.</string>
-    <string name="pin_step3">3. Otvorite SETUP → API PIN i prepišite prikazani PIN.</string>
-    <string name="pin_step4">4. Vratite se na svoju uobičajenu Wi-Fi mrežu i upišite PIN ispod.</string>
+    <string name="pin_step1">Spojite mobitel na Wi-Fi mrežu samog regulatora.</string>
+    <string name="pin_step2">U pregledniku otvorite http://192.168.42.1/dashboard.</string>
+    <string name="pin_step3">Otvorite SETUP → API PIN i prepišite prikazani PIN.</string>
+    <string name="pin_step4">Vratite se na svoju uobičajenu Wi-Fi mrežu i upišite PIN ispod.</string>
     <string name="pin_label">PIN uređaja</string>
     <string name="pin_wrong">Za ovaj PIN nije pronađen regulator.</string>
     <string name="connect">Poveži</string>
+    <string name="pin_from_controller">Dohvati PIN s regulatora</string>
+    <string name="pin_enter">Imam API PIN</string>
+    <string name="ctrl_how">Kako to radi</string>
+    <string name="ctrl_step1">Budite na kućnoj Wi-Fi mreži ili na Wi-Fi mreži samog regulatora.</string>
+    <string name="ctrl_step2">Pronađite svoj regulator i odaberite ga po imenu.</string>
+    <string name="ctrl_step3">Upišite njegov 4-znamenkasti PIN sučelja. OnlyHeat čita API PIN i prijavljuje vas.</string>
     <string name="server_unreachable">Poslužitelj grijanja ne odgovara. Pokušajte ponovno.</string>
     <string name="failed">Nešto nije u redu.</string>
     <string name="history">Povijest</string>
@@ -59,8 +65,8 @@
     <string name="back">Natrag</string>
     <string name="schedule_title">Raspored</string>
     <string name="schedule_desc">Dok je unos aktivan, soba drži zadanu temperaturu i zanemaruje ručne i pametne postavke.</string>
-    <string name="schedule_local_only">Raspored se može uređivati samo dok je mobitel spojen na Wi-Fi regulatora.</string>
-    <string name="schedule_unreachable">Regulator na adresi %1$s nije dostupan.</string>
+    <string name="schedule_local_only">Raspored se može uređivati samo dok je mobitel na Wi-Fi mreži regulatora ili na kućnoj Wi-Fi mreži na koju je regulator spojen.</string>
+    <string name="schedule_unreachable">Regulator nije dostupan. Provjerite Wi-Fi vezu i pokušajte ponovno.</string>
     <string name="schedule_empty">Nema unosa u rasporedu. Sobe koriste temperature postavljene u aplikaciji.</string>
     <string name="schedule_saved">Raspored spremljen</string>
     <string name="add_entry">Dodaj unos</string>
@@ -81,6 +87,7 @@
     <string name="dashboard_pin">PIN nadzorne ploče</string>
     <string name="dashboard_pin_desc">Četveroznamenkasti PIN za prijavu na http://192.168.42.1/dashboard.</string>
     <string name="wrong_dashboard_pin">Pogrešan PIN nadzorne ploče.</string>
+    <string name="no_api_pin">Stranica Setup na kontroleru ne prikazuje API PIN.</string>
     <string name="local_permission_denied">OnlyHeat treba pristup lokalnoj mreži kako bi došao do regulatora.</string>
     <string name="restart">Ponovno pokreni</string>
     <string name="restart_title">Ponovno pokrenuti regulator?</string>
@@ -88,13 +95,13 @@
     <string name="restarting">Ponovno pokretanje regulatora…</string>
     <string name="restarting_hint">Ako se mobitel u međuvremenu prebaci na drugu Wi-Fi mrežu, ponovno ga spojite na regulator.</string>
     <string name="restart_done">Regulator je ponovno pokrenut</string>
-    <string name="restart_timeout">Regulator se još nije javio. Pričekajte još nekoliko minuta.</string>
+    <string name="restart_timeout">Aplikacija nije mogla potvrditi da je regulator ponovno dostupan. Provjerite njegovu vezu i ponovite dijagnostiku.</string>
     <string name="tab_rooms">Sobe</string>
     <string name="tab_controller">Regulator</string>
     <string name="schedule_card_desc">Odredite kada soba drži zadanu temperaturu.</string>
     <string name="restart_card_title">Ponovno pokretanje regulatora</string>
     <string name="restart_card_desc">Koristite kada regulator prestane reagirati, umjesto isključivanja na osiguraču.</string>
-    <string name="controller_local_only">Raspored i ponovno pokretanje rade samo dok je mobitel na Wi-Fi mreži regulatora.</string>
+    <string name="controller_local_only">Raspored i ponovno pokretanje rade samo dok je mobitel na Wi-Fi mreži regulatora ili na kućnoj Wi-Fi mreži na koju je regulator spojen.</string>
     <string name="pin_saved">Spremljen</string>
     <string name="pin_not_set">Nije postavljen</string>
     <string name="change">Promijeni</string>
@@ -104,13 +111,24 @@
     <string name="diag_desc">Pokrenite kada aplikacija ne može doći do grijanja.</string>
     <string name="diag_run">Provjeri</string>
     <string name="diag_cloud">Oblak → regulator</string>
-    <string name="diag_local">Mobitel → regulator (njegov Wi-Fi)</string>
+    <string name="diag_local">Mobitel → regulator (lokalna mreža)</string>
     <string name="diag_ok">Dostupan</string>
     <string name="diag_fail">Nije dostupan</string>
     <string name="diag_verdict_ok">Sve radi.</string>
-    <string name="diag_verdict_ok_remote">Regulator je na mreži. Njegov Wi-Fi treba vam samo za raspored i ponovno pokretanje.</string>
+    <string name="diag_verdict_ok_remote">Regulator je na mreži. Za raspored i ponovno pokretanje trebate biti na njegovom ili kućnom Wi-Fiju.</string>
     <string name="diag_verdict_cloud_link">Regulator radi, ali mu je veza s oblakom prekinuta. Ponovno pokretanje trebalo bi to riješiti.</string>
-    <string name="diag_verdict_nothing">Ni oblak ni mobitel ne mogu doći do regulatora. Ako je mobitel na Wi-Fi mreži regulatora, regulator je vjerojatno zamrznut: isključite ga i uključite na osiguraču. Inače se spojite na njegov Wi-Fi i ponovno provjerite.</string>
+    <string name="diag_verdict_nothing">Aplikacija nije mogla doći do regulatora preko oblaka ni na lokalnim adresama koje je provjerila. Spojite se na Wi-Fi mrežu regulatora i ponovno provjerite.</string>
+    <string name="diag_unverified">Nepotvrđena nadzorna ploča</string>
+    <string name="diag_verdict_unverified">Dodirnite „Nepotvrđena nadzorna ploča” i odaberite svoj regulator prema nazivu.</string>
+    <string name="controller_wifi_title">Spojite se na Wi-Fi regulatora</string>
+    <string name="controller_wifi_desc">U postavkama Wi-Fi mreže spojite se na mrežu regulatora, zatim dodirnite Pokušaj ponovno. Ako se pojavi upozorenje da nema interneta, ostanite povezani.</string>
+    <string name="use_home_wifi">Koristi kućni Wi-Fi</string>
+    <string name="lan_address_searching">Traženje regulatora…</string>
+    <string name="lan_controller_title">Regulator na kućnom Wi-Fiju</string>
+    <string name="lan_devices_title">Odaberite regulator</string>
+    <string name="lan_match_wifi_name">Odaberite regulator prema nazivu njegove Wi-Fi mreže.</string>
+    <string name="lan_no_named_devices">Nije pronađen nijedan regulator s nazivom. Pokušajte se spojiti na Wi-Fi mrežu regulatora.</string>
+    <string name="lan_duplicate_name">Više regulatora koristi naziv %1$s. Spojite se na Wi-Fi mrežu svog regulatora kako biste ih razlikovali.</string>
     <string name="diag_verdict_no_internet">Mobitel ne može doći do TTO oblaka. Provjerite internetsku vezu.</string>
     <string name="away_title">Odsutnost</string>
     <string name="away_go">Odlazim</string>
@@ -140,4 +158,6 @@
         <item quantity="few">%1$d sobe</item>
         <item quantity="other">%1$d soba</item>
     </plurals>
+    <string name="ctrl_find">Pronađi moj regulator</string>
+    <string name="ctrl_on_hotspot">Na Wi-Fi mreži regulatora</string>
 </resources>
