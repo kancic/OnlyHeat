@@ -67,6 +67,8 @@ import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
 internal val Heat = Color(0xFFFF5A00)
+internal val NightSky = Color(0xFF353D70)
+internal val NightInk = Color(0xFFE6E8FF)
 const val STEP = 0.5
 const val MIN_T = 5.0
 const val MAX_T = 30.0
@@ -795,15 +797,24 @@ private fun RoomCard(room: Room, boosted: Boolean, lastTarget: () -> Double, mod
     val on = room.target != null
     val active = room.heating && on
     val scheme = MaterialTheme.colorScheme
-    val container by animateColorAsState(
-        if (on) roomContainer(room.id) else scheme.surfaceContainerLow, // heating shows as fire on top
-        MaterialTheme.motionScheme.defaultEffectsSpec(),
-    )
+    val cold = isCold(room, remember { Settings() }) // read each recomposition, so a changed limit shows up
+    val asleep = !on && !cold
+    val spec = MaterialTheme.motionScheme.defaultEffectsSpec<Color>()
+    // Off and asleep: a night-sky card in any theme, like the fire's fixed orange. Heating shows as fire on top.
+    val container by animateColorAsState(if (asleep) NightSky else if (on) roomContainer(room.id) else scheme.surfaceContainerLow, spec)
+    val content by animateColorAsState(if (asleep) NightInk else contentColorFor(if (on) roomContainer(room.id) else scheme.surfaceContainerLow), spec)
     PressCard(
         onOpen, modifier.fillMaxWidth().shared("room-${room.id}"),
-        colors = CardDefaults.cardColors(containerColor = container),
+        colors = CardDefaults.cardColors(containerColor = container, contentColor = content),
     ) {
-        Column(Modifier.flames(active, room.id).padding(20.dp)) {
+        val ink = LocalContentColor.current
+        Column(
+            Modifier.flames(active, room.id, boosted)
+                .drift(on && !active, ink.copy(alpha = 0.10f), room.id) // at target: warm bubbles
+                .night(asleep, ink, room.id) // off: moon, stars, z's
+                .frost(cold, room.id) // below the cold-alert temperature: ice on glass
+                .padding(20.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(room.name, style = MaterialTheme.typography.titleLargeEmphasized)
@@ -825,7 +836,7 @@ private fun RoomCard(room: Room, boosted: Boolean, lastTarget: () -> Double, mod
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RollingTemp(room.current, MaterialTheme.typography.displayMedium, Modifier.weight(1f))
                 if (on) TempStepper(room.target!!, onTarget, label = stringResource(Res.string.target))
-                else Text(stringResource(Res.string.off), style = MaterialTheme.typography.titleMedium, color = scheme.onSurfaceVariant)
+                else Text(stringResource(Res.string.off), style = MaterialTheme.typography.titleMedium, color = LocalContentColor.current.copy(alpha = 0.75f))
             }
         }
     }

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -112,18 +113,24 @@ fun RoomScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
           ) {
             val heating = room.heating && room.target != null
+            val on = room.target != null
+            val cold = isCold(room, remember { Settings() })
+            val asleep = !on && !cold
+            val spec = MaterialTheme.motionScheme.defaultEffectsSpec<Color>()
+            val blob by animateColorAsState(if (asleep) NightSky else roomContainer(room.id), spec)
+            val ink by animateColorAsState(if (asleep) NightInk else contentColorFor(roomContainer(room.id)), spec)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Hero: the temperature sits in a blob that turns into a spinning cookie, with fire inside, while heating.
-                MorphBlob(
-                    heating,
-                    roomContainer(room.id),
-                    Modifier.size(184.dp),
-                ) {
-                    Box(Modifier.matchParentSize().flames(heating, room.id)) // same fire as the list card, clipped to the blob
-                    RollingTemp(
-                        room.current, MaterialTheme.typography.displayMediumEmphasized,
-                        color = contentColorFor(roomContainer(room.id)),
+                // Hero: the temperature sits in a blob that turns into a spinning cookie while heating,
+                // with the list card's animations inside, clipped to the blob.
+                MorphBlob(heating, blob, Modifier.size(184.dp)) {
+                    Box(
+                        Modifier.matchParentSize()
+                            .flames(heating, room.id)
+                            .drift(on && !heating, ink.copy(alpha = 0.12f), room.id)
+                            .night(asleep, ink, room.id, moon = Offset(0.42f, 0.2f), zTo = Offset(0.72f, 0.12f)) // above the number
+                            .frost(cold, room.id),
                     )
+                    RollingTemp(room.current, MaterialTheme.typography.displayMediumEmphasized, color = ink)
                 }
                 Spacer(Modifier.width(20.dp))
                 Column {

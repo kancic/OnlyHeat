@@ -144,6 +144,8 @@ internal fun saveWatch(s: Settings, w: WatchState) {
 /** Below this a room triggers a cold alert; null = off. */
 internal fun coldSetting(s: Settings) = s.getDouble("alerts.cold", 12.0)
 internal fun coldLimit(s: Settings): Double? = coldSetting(s).takeIf { it > 0 }
+/** Below the cold-alert temperature right now: the room cards and details show frost. */
+internal fun isCold(room: Room, s: Settings): Boolean = coldLimit(s).let { it != null && room.current != null && room.current < it }
 
 fun alertsEnabled(s: Settings = Settings()) = s.getBoolean("alerts.on", false)
 
