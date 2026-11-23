@@ -9,8 +9,8 @@ import androidx.room3.OnConflictStrategy
 import androidx.room3.Query
 import androidx.room3.RoomDatabase
 import androidx.room3.RoomDatabaseConstructor
-import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.russhwolf.settings.Settings
+import org.koin.core.scope.Scope
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.hours
 
@@ -43,23 +43,22 @@ expect object HistoryDbConstructor : RoomDatabaseConstructor<HistoryDb> {
     override fun initialize(): HistoryDb
 }
 
-internal expect fun historyDbBuilder(): RoomDatabase.Builder<HistoryDb>
-
-val history: ReadingDao by lazy { historyDbBuilder().setDriver(BundledSQLiteDriver()).build().readings() }
+/** [Scope] receiver: Android needs the Context from Koin. */
+internal expect fun Scope.historyDbBuilder(): RoomDatabase.Builder<HistoryDb>
 
 internal fun Reading.point() = Point(time, measured, target)
 
-suspend fun storeLog(roomId: String, log: List<Point>) =
-    history.insert(log.filter { it.time > 0 }.map { Reading(roomId, it.time, it.current, it.target) })
+suspend fun ReadingDao.store(roomId: String, log: List<Point>) =
+    insert(log.filter { it.time > 0 }.map { Reading(roomId, it.time, it.current, it.target) })
 
 /**
- * Copies every room's last ~25 h from the server into [history], unless that was done within [every].
+ * Copies every room's last ~25 h from the server into the local [history], unless that was done within [every].
  * Has to run at least daily for gap-free history: the Android worker does, desktop/iOS only while the app is open.
  */
-suspend fun syncHistory(api: HeatApi, key: String, s: Settings = Settings(), every: Duration = 6.hours) {
+suspend fun syncHistory(api: HeatApi, history: ReadingDao, key: String, s: Settings, every: Duration = 6.hours) {
     val now = nowSeconds()
     if (now - s.getLong("history.synced", 0) < every.inWholeSeconds) return
     // One room at a time: the server relays to the controller serially, parallel calls time each other out.
-    api.home(key).rooms.forEach { storeLog(it.id, api.roomLog(key, it.id)) }
+    api.home(key).rooms.forEach { history.store(it.id, api.roomLog(key, it.id)) }
     s.putLong("history.synced", now)
 }

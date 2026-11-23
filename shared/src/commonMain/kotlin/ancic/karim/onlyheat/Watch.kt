@@ -48,7 +48,7 @@ internal fun removeBoost(s: Settings, room: String) = s.remove("boost.$room")
  * Ends boosts whose time is up: restores the old target, unless the user changed the target meanwhile.
  * Safe to call from anywhere (app poll, Android worker). Throws if the cloud can't be reached, so callers retry.
  */
-suspend fun endExpiredBoosts(api: HeatApi = HeatApi(), key: String? = savedAuthKey(), s: Settings = Settings()) {
+suspend fun endExpiredBoosts(api: HeatApi, key: String?, s: Settings) {
     key ?: return
     val due = loadBoosts(s).filter { it.until <= nowSeconds() }
     if (due.isEmpty()) return
@@ -147,11 +147,11 @@ internal fun coldLimit(s: Settings): Double? = coldSetting(s).takeIf { it > 0 }
 /** Below the cold-alert temperature right now: the room cards and details show frost. */
 internal fun isCold(room: Room, s: Settings): Boolean = coldLimit(s).let { it != null && room.current != null && room.current < it }
 
-fun alertsEnabled(s: Settings = Settings()) = s.getBoolean("alerts.on", false)
+fun alertsEnabled(s: Settings) = s.getBoolean("alerts.on", false)
 
 /** One background check: returns the texts to notify. Called by the Android worker every ~15 minutes. */
-suspend fun checkAlerts(api: HeatApi = HeatApi(), s: Settings = Settings()): List<String> {
-    val key = savedAuthKey() ?: return emptyList()
+suspend fun checkAlerts(api: HeatApi, s: Settings): List<String> {
+    val key = savedAuthKey(s) ?: return emptyList()
     val result = attempt { api.home(key) }
     val e = result.exceptionOrNull()
     // Same reading as the Connection check: an error answer from the cloud = it lost the controller;

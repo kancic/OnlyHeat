@@ -29,7 +29,6 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.compose.runtime.saveable.listSaver
@@ -74,6 +73,9 @@ import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
+import org.koin.compose.koinInject
+import org.koin.compose.viewmodel.koinViewModel
+import org.koin.core.parameter.parametersOf
 
 internal val Heat = Color(0xFFFF5A00)
 internal val NightSky = Color(0xFF353D70)
@@ -127,9 +129,9 @@ fun App(
 ) {
     OnlyHeatTheme(dynamicScheme) {
         Surface(Modifier.fillMaxSize()) {
-            val settings = remember { Settings() }
-            var key by remember { mutableStateOf(settings.getStringOrNull("authKey")) }
-            val api = remember { HeatApi() }
+            val settings = koinInject<Settings>()
+            var key by remember { mutableStateOf(savedAuthKey(settings)) }
+            val api = koinInject<HeatApi>()
             val k = key
             if (k == null) LoginScreen(
                 api,
@@ -149,8 +151,9 @@ fun App(
  * The callbacks come from the current composition (they hold the activity), so [Main] re-assigns them
  * on every composition instead of the model keeping the first activity's.
  */
-private class HomeModel(
+internal class HomeModel(
     private val api: HeatApi,
+    private val history: ReadingDao,
     private val key: String,
     private val settings: Settings
 ) : ViewModel() {
@@ -208,7 +211,7 @@ private class HomeModel(
         loadWeather(force = false)
         // Keeps the local history gap-free while the app runs (a no-op unless 6 h have passed).
         // Not on the first tick: the slow server would make the screen's own first loads time out.
-        if (ticks++ > 0) attempt { syncHistory(api, key, settings) } // next tick tries again
+        if (ticks++ > 0) attempt { syncHistory(api, history, key, settings) } // next tick tries again
     }
 
     // ponytail: one dashboard login per 15 min (or on pull to refresh), only with a saved PIN.
@@ -365,7 +368,8 @@ private fun Main(
     onLogout: () -> Unit,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val model = viewModel(key = "home:$key") { HomeModel(api, key, Settings()) }
+    val settings = koinInject<Settings>()
+    val model = koinViewModel<HomeModel>(key = "home:$key") { parametersOf(key) }
     model.visible = { lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
     model.notify = notify
     model.wakeAt = wakeAt
@@ -416,7 +420,7 @@ private fun Main(
                                 host,
                                 requestLocalNetwork,
                                 backgroundAlerts,
-                                { clearAccountState(Settings()); onLogout() }) {
+                                { clearAccountState(settings); onLogout() }) {
                                 backStack += it
                             }
                         }
@@ -725,7 +729,7 @@ private fun LoginScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val settings = remember { Settings() }
+    val settings = koinInject<Settings>()
     val controllerPicker = remember { LanControllerPicker(settings) }
     var way by rememberSaveable { mutableStateOf<LoginWay?>(null) }
     var dashboardPin by remember { mutableStateOf("") }
@@ -1108,7 +1112,7 @@ private fun RoomCard(
     val scheme = MaterialTheme.colorScheme
     val cold = isCold(
         room,
-        remember { Settings() }) // read each recomposition, so a changed limit shows up
+        koinInject()) // read each recomposition, so a changed limit shows up
     val asleep = !on && !cold
     val spec = MaterialTheme.motionScheme.defaultEffectsSpec<Color>()
     // Off and asleep: a night-sky card in any theme, like the fire's fixed orange. Heating shows as fire on top.

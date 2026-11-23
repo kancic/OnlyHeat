@@ -52,6 +52,7 @@ import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
+import org.koin.compose.koinInject
 
 @Composable
 private fun SubScreen(
@@ -85,6 +86,8 @@ fun RoomScreen(
     api: HeatApi, key: String, room: Room, boost: Boost?,
     onBoost: (minutes: Int) -> Unit, onStopBoost: () -> Unit, onBack: () -> Unit,
 ) {
+    val settings = koinInject<Settings>()
+    val history = koinInject<ReadingDao>()
     var log by remember { mutableStateOf<List<Point>?>(null) }
     var smart by remember { mutableStateOf<Smart?>(null) }
     var logError by remember { mutableStateOf<String?>(null) }
@@ -95,7 +98,7 @@ fun RoomScreen(
     LaunchedEffect(room.id) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
-                attempt { api.roomLog(key, room.id).also { storeLog(room.id, it) } }
+                attempt { api.roomLog(key, room.id).also { history.store(room.id, it) } }
                     .onSuccess { log = it; logError = null }.onFailure { logError = errorText(it) }
                 attempt { api.smart(key, room.id) }
                     .onSuccess { smart = it; smartError = null }.onFailure { smartError = errorText(it) }
@@ -114,7 +117,7 @@ fun RoomScreen(
           ) {
             val heating = room.heating && room.target != null
             val on = room.target != null
-            val cold = isCold(room, remember { Settings() })
+            val cold = isCold(room, settings)
             val asleep = !on && !cold
             val spec = MaterialTheme.motionScheme.defaultEffectsSpec<Color>()
             val blob by animateColorAsState(if (asleep) NightSky else roomContainer(room.id), spec)
@@ -172,7 +175,7 @@ fun RoomScreen(
             }
 
             BoostCard(boost, onBoost, onStopBoost)
-            val supported = remember { hasThermalIntelligence(Settings().getStringOrNull(FIRMWARE)) }
+            val supported = remember { hasThermalIntelligence(settings.getStringOrNull(FIRMWARE)) }
             // Old firmware: only show it while it's on, so it can be turned off.
             if (supported || smart?.on == true) SmartCard(api, key, room, smart, smartError, supported) { smart = it }
           }
@@ -294,6 +297,8 @@ fun OverviewScreen(
     cache: MutableState<List<DaySummary>?>, // hoisted so coming back from a room doesn't reload from scratch
     onRoom: (String) -> Unit,
 ) {
+    val settings = koinInject<Settings>()
+    val history = koinInject<ReadingDao>()
     var days by cache
     var error by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
@@ -313,7 +318,7 @@ fun OverviewScreen(
             since = history.oldest()
         }
         read() // what we have, right away
-        attempt { syncHistory(api, key, every = 30.minutes) }.onSuccess { read() } // then top up from the server
+        attempt { syncHistory(api, history, key, settings, every = 30.minutes) }.onSuccess { read() } // then top up from the server
     }
 
     SubScreen(stringResource(Res.string.history), onBack = null) { pad ->

@@ -52,8 +52,10 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import kotlinx.coroutines.delay
+import org.koin.mp.KoinPlatform
 
-private val api get() = backgroundApi
+// Glance builds receivers and callbacks itself, so they look up the shared instances.
+private val api: HeatApi get() = KoinPlatform.getKoin().get()
 
 /** Bumped to make the widget fetch fresh room data. */
 private val Version = longPreferencesKey("version")
@@ -92,7 +94,7 @@ class HeatWidget : GlanceAppWidget() {
 private class WidgetState(val key: String?, val home: Home?)
 
 private suspend fun fetch(): WidgetState {
-    val key = savedAuthKey() ?: return WidgetState(null, null)
+    val key = savedAuthKey(KoinPlatform.getKoin().get()) ?: return WidgetState(null, null)
     val home = attempt { api.home(key) }
         .onFailure { android.util.Log.w("OnlyHeat", "widget refresh failed", it) }
         .getOrNull()
@@ -245,7 +247,7 @@ class StepTarget : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         val roomId = parameters[RoomId] ?: return
         val target = parameters[Target] ?: return
-        val key = savedAuthKey() ?: return
+        val key = savedAuthKey(KoinPlatform.getKoin().get()) ?: return
         val pending = pendingKey(roomId)
         suspend fun stillOurs() = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)[pending] == target
 

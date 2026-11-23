@@ -41,7 +41,7 @@ class AuthExpired : ApiException(AUTH_EXPIRED)
 private const val AUTH_EXPIRED = "Invalid authentication key" // exact server text (we always send lang=en)
 
 /** The saved session, or null when logged out. For callers outside the app UI, e.g. home-screen widgets. */
-fun savedAuthKey(): String? = com.russhwolf.settings.Settings().getStringOrNull("authKey")
+fun savedAuthKey(s: com.russhwolf.settings.Settings): String? = s.getStringOrNull("authKey")
 
 /** No usable reply after retries (network down, timeouts, empty/garbled bodies). */
 class ServerUnreachable(cause: Throwable?) : Exception(cause)

@@ -10,21 +10,25 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.russhwolf.settings.Settings
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 import java.util.concurrent.TimeUnit
 
-/** One client for everything that runs without the UI: widget, its buttons and this worker. */
-internal val backgroundApi by lazy { HeatApi() }
-
 /** Ends due boosts and, when enabled, checks for alerts. Runs periodically and at each boost's end. */
-class HeatWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+class HeatWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params), KoinComponent {
+    private val api: HeatApi by inject()
+    private val history: ReadingDao by inject()
+    private val settings: Settings by inject()
+
     override suspend fun doWork(): Result {
-        initHistory(applicationContext)
-        savedAuthKey()?.let { key ->
-            attempt { syncHistory(backgroundApi, key) } // no-op unless 6 h have passed
+        val key = savedAuthKey(settings)
+        key?.let {
+            attempt { syncHistory(api, history, it, settings) } // no-op unless 6 h have passed
                 .onFailure { android.util.Log.w("OnlyHeat", "history sync failed", it) }
         }
-        if (alertsEnabled()) checkAlerts(backgroundApi).forEach { applicationContext.notifyHeat(it, alert = true) }
-        val boostsDone = attempt { endExpiredBoosts(backgroundApi) }
+        if (alertsEnabled(settings)) checkAlerts(api, settings).forEach { applicationContext.notifyHeat(it, alert = true) }
+        val boostsDone = attempt { endExpiredBoosts(api, savedAuthKey(settings), settings) }
             .onFailure { android.util.Log.w("OnlyHeat", "ending boosts failed", it) }.isSuccess
         refreshWidgets(applicationContext)
         return if (boostsDone || runAttemptCount >= 5) Result.success() else Result.retry()

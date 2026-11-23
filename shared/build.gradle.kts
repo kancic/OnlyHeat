@@ -39,7 +39,7 @@ kotlin {
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.logging)
             implementation(libs.kotlinx.serialization.json)
-            implementation(libs.settings)
+            api(libs.settings) // in the signatures the Android worker and widget call
             implementation(libs.navigation3.ui)
             implementation(libs.kotlinx.datetime)
             implementation(libs.lifecycle.runtime.compose)
@@ -47,6 +47,8 @@ kotlin {
             implementation(libs.lifecycle.viewmodel.navigation3)
             implementation(libs.room3.runtime)
             implementation(libs.sqlite.bundled)
+            api(libs.koin.core) // initKoin() takes a KoinAppDeclaration
+            implementation(libs.koin.compose.viewmodel)
         }
         androidMain.dependencies { implementation(libs.ktor.client.okhttp) }
         named("desktopMain").dependencies {

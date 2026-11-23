@@ -1,7 +1,6 @@
 package ancic.karim.onlyheat
 
 import android.Manifest
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -36,8 +35,6 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        verboseHttpLogs = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
-        initHistory(this)
         scheduleHistorySync()
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)

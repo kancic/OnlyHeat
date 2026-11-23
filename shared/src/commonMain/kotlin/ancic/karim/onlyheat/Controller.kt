@@ -22,6 +22,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.russhwolf.settings.Settings
+import org.koin.compose.koinInject
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -37,7 +38,7 @@ fun ControllerTab(
     cloudStatus: suspend () -> Throwable?, // null when the cloud can reach the controller right now
     snackbar: SnackbarHostState, backgroundAlerts: ((Boolean) -> Unit)?, onLogout: () -> Unit, openSchedule: () -> Unit,
 ) {
-    val settings = remember { Settings() }
+    val settings = koinInject<Settings>()
     var pin by remember { mutableStateOf(savedPin(settings)) }
     var askPin by remember { mutableStateOf(false) }
     var restartAfterPin by remember { mutableStateOf(false) }

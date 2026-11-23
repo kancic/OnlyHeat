@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.russhwolf.settings.Settings
+import org.koin.compose.koinInject
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalTime
 import org.jetbrains.compose.resources.StringResource
@@ -71,7 +72,7 @@ internal class ScheduleModel : ViewModel() {
 /** Edits the controller's schedule through its local dashboard (reachable on its Wi-Fi or the home Wi-Fi). */
 @Composable
 fun ScheduleScreen(host: String, requestLocalNetwork: suspend () -> Boolean, onBack: () -> Unit) {
-    val settings = remember { Settings() }
+    val settings = koinInject<Settings>()
     val controllerPicker = remember { LanControllerPicker(settings) }
     var pin by remember { mutableStateOf(savedPin(settings)) }
     val local = remember(host, pin) { pin?.let { LocalApi(host, it, settings) { controllerPicker.ask() } } }

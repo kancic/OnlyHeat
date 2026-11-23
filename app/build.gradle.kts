@@ -36,4 +36,5 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.glance.appwidget)
     implementation(libs.work.runtime)
+    implementation(libs.koin.android)
 }
