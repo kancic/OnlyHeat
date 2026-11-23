@@ -171,4 +171,19 @@
     </plurals>
     <string name="ctrl_find">Pronađi moj regulator</string>
     <string name="ctrl_on_hotspot">Na Wi-Fi mreži regulatora</string>
+    <string name="tip_next">Dalje</string>
+    <string name="tip_done">Razumijem</string>
+    <string name="tip_skip">Preskoči</string>
+    <string name="tips_again">Ponovno prikaži savjete</string>
+    <string name="tips_again_done">Savjeti će se ponovno prikazati na kartici Sobe.</string>
+    <string name="tour_away_title">Odlazite od kuće?</string>
+    <string name="tour_away">Odsutnost snižava zadane temperature dok vas nema. Ako je grijanje u sobi već isključeno, tako i ostaje. Sobe s rasporedom mogu zadržati trenutačnu zadanu temperaturu. „Natrag sam” vraća prethodne zadane temperature.</string>
+    <string name="tour_cards_title">Što pokazuju kartice</string>
+    <string name="tour_cards">Slika na kartici pokazuje stanje sobe. Inje se pojavljuje kad je temperatura sobe ispod praga za upozorenje na hladnoću.</string>
+    <string name="state_heating">Grije sada</string>
+    <string name="state_warm">Dovoljno toplo</string>
+    <string name="state_off">Grijanje isključeno</string>
+    <string name="state_cold">Prehladno</string>
+    <string name="tour_schedule_title">Ne možete promijeniti sobu?</string>
+    <string name="tour_schedule">Ako na kartici piše „Raspored”, temperaturu ne možete mijenjati. Uklonite raspored pod Regulator → Raspored i tada možete.</string>
 </resources>

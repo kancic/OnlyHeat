@@ -190,7 +190,15 @@ fun ControllerTab(
                 }
             }
 
-            Section(stringResource(Res.string.account), stringResource(Res.string.account_desc), modifier = Modifier.springIn(5)) {
+            val tipsAgain = stringResource(Res.string.tips_again_done)
+            Section(
+                stringResource(Res.string.account), stringResource(Res.string.account_desc), modifier = Modifier.springIn(5),
+                below = {
+                    TextButton({ resetTips(settings); scope.launch { snackbar.showSnackbar(tipsAgain) } }) {
+                        Text(stringResource(Res.string.tips_again))
+                    }
+                },
+            ) {
                 OutlinedButton(onLogout, shapes = ButtonDefaults.shapes()) { Text(stringResource(Res.string.log_out)) }
             }
           }

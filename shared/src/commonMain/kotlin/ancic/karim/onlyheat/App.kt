@@ -418,7 +418,8 @@ private fun Main(
                                 host,
                                 requestLocalNetwork,
                                 backgroundAlerts,
-                                onLogout) {
+                                onLogout = onLogout,
+                            ) {
                                 backStack += it
                             }
                         }
@@ -486,9 +487,12 @@ private fun MainTabs(
                 initialScale = 0.92f
             )) togetherWith
                     fadeOut(tween(90))
-        }) { tab ->
-            when (tab) {
-                Tab.Rooms -> RoomsTab(model) { open(Screen.RoomDetail(it)) }
+        }) { displayedTab ->
+            when (displayedTab) {
+                Tab.Rooms -> {
+                    if (tab == Tab.Rooms) RoomsTip()
+                    RoomsTab(model) { open(Screen.RoomDetail(it)) }
+                }
                 Tab.History -> OverviewScreen(
                     api,
                     key,
@@ -496,15 +500,17 @@ private fun MainTabs(
                     model.days
                 ) { open(Screen.RoomDetail(it)) }
 
-                Tab.Controller -> ControllerTab(
-                    model.home?.device,
-                    host,
-                    requestLocalNetwork,
-                    cloudStatus = { attempt { api.home(key) }.exceptionOrNull() },
-                    snackbar = model.snackbar,
-                    backgroundAlerts = backgroundAlerts,
-                    onLogout = onLogout,
-                ) { open(Screen.ScheduleEditor) }
+                Tab.Controller -> {
+                    ControllerTab(
+                        model.home?.device,
+                        host,
+                        requestLocalNetwork,
+                        cloudStatus = { attempt { api.home(key) }.exceptionOrNull() },
+                        snackbar = model.snackbar,
+                        backgroundAlerts = backgroundAlerts,
+                        onLogout = onLogout,
+                    ) { open(Screen.ScheduleEditor) }
+                }
             }
         }
     }

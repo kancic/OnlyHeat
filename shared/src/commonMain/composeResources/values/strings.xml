@@ -170,4 +170,19 @@
     </plurals>
     <string name="ctrl_find">Find my controller</string>
     <string name="ctrl_on_hotspot">On the controller’s Wi-Fi</string>
+    <string name="tip_next">Next</string>
+    <string name="tip_done">Got it</string>
+    <string name="tip_skip">Skip</string>
+    <string name="tips_again">Show tips again</string>
+    <string name="tips_again_done">Tips will show again on the Rooms tab.</string>
+    <string name="tour_away_title">Leaving home?</string>
+    <string name="tour_away">Away lowers room temperatures while you’re gone. Rooms that are off stay off, and rooms on a schedule may keep their current targets. “I’m back” restores the previous targets.</string>
+    <string name="tour_cards_title">What the cards show</string>
+    <string name="tour_cards">Each card’s picture tells you how the room is doing. Frost appears when the room temperature is below your cold-alert threshold.</string>
+    <string name="state_heating">Heating now</string>
+    <string name="state_warm">Warm enough</string>
+    <string name="state_off">Heating off</string>
+    <string name="state_cold">Too cold</string>
+    <string name="tour_schedule_title">Can’t change a room?</string>
+    <string name="tour_schedule">If its card says “Schedule”, you can’t change its temperature. Remove the schedule under Controller → Schedule, then you can.</string>
 </resources>
