@@ -45,6 +45,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -131,6 +134,8 @@ private class HomeModel(
     var allTarget by mutableStateOf(settings.getDouble("allTarget", 21.0)) // "All rooms" stepper
     var error by mutableStateOf<String?>(null)
     var refreshing by mutableStateOf(false)
+    var weather by mutableStateOf<Weather?>(null) // dashboard's AccuWeather, when the cloud has no TS7 value
+    private var weatherAt = 0L
     val days = mutableStateOf<List<DaySummary>?>(null) // History tab, kept across navigation
     private val pending = mutableMapOf<String, Job>() // debounced writes per room id
     private var ticks = 0
@@ -160,9 +165,21 @@ private class HomeModel(
         boosts = loadBoosts(settings)
         away = awaySaved(settings) != null
         load()
+        loadWeather(force = false)
         // Keeps the local history gap-free while the app runs (a no-op unless 6 h have passed).
         // Not on the first tick: the slow server would make the screen's own first loads time out.
         if (ticks++ > 0) attempt { syncHistory(api, key, settings) } // next tick tries again
+    }
+
+    // ponytail: one dashboard login per 15 min (or on pull to refresh), only with a saved PIN.
+    // Unreachable controller (off the home network) hides the weather instead of showing a stale one.
+    private suspend fun loadWeather(force: Boolean) {
+        val h = home ?: return
+        if (h.outdoorTemp != null || (!force && nowSeconds() - weatherAt <= 15 * 60)) return
+        val pin = savedPin(settings) ?: return
+        weatherAt = nowSeconds()
+        attempt { LocalApi(h.ip ?: HOTSPOT, pin, settings) { null }.weather() }
+            .onSuccess { weather = it }.onFailure { weather = null; log("dashboard weather failed", it) }
     }
 
     /** Lowers every room that is on to [awayTemp] and remembers what each one had. */
@@ -232,7 +249,7 @@ private class HomeModel(
         if (settings.getDoubleOrNull("lastTarget.$roomId") != t) settings.putDouble("lastTarget.$roomId", t)
     }
 
-    fun refresh() = scope.launch { refreshing = true; load(); refreshing = false }
+    fun refresh() = scope.launch { refreshing = true; load(); refreshing = false; loadWeather(force = true) }
 
     fun setTarget(room: Room, target: Double?) {
         home = home?.let { h -> h.copy(rooms = h.rooms.map { if (it.id == room.id) it.copy(target = target) else it }) }
@@ -411,6 +428,24 @@ private fun MainTabs(
 internal val TabInsets @Composable get() =
     WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
 
+/** Outside temperature with the weather icon; the full "Outside …" text is for screen readers. */
+@Composable
+private fun WeatherPill(emoji: String?, outside: Double, big: Boolean) {
+    val label = stringResource(Res.string.outside, fmt1(outside))
+    Surface(
+        Modifier.padding(start = 12.dp, end = 8.dp).semantics(mergeDescendants = true) { contentDescription = label },
+        shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer,
+    ) {
+        Row(Modifier.padding(start = 12.dp, end = 16.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            emoji?.let {
+                Text(it, style = if (big) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.width(6.dp))
+            }
+            Text("${fmt1(outside)}°", style = if (big) MaterialTheme.typography.titleLargeEmphasized else MaterialTheme.typography.titleMediumEmphasized)
+        }
+    }
+}
+
 @Composable
 private fun RoomsTab(model: HomeModel, openRoom: (String) -> Unit) {
     val scroll = collapsingBar()
@@ -418,19 +453,32 @@ private fun RoomsTab(model: HomeModel, openRoom: (String) -> Unit) {
     Scaffold(
         topBar = {
             LargeFlexibleTopAppBar(
-                title = { Text(model.home?.device ?: "OnlyHeat") },
-                subtitle = {
-                    val h = model.home ?: return@LargeFlexibleTopAppBar
-                    val heating = h.rooms.count { it.heating && it.target != null }
-                    Text(
-                        listOfNotNull(
-                            h.outdoorTemp?.let { stringResource(Res.string.outside, fmt1(it)) },
-                            pluralStringResource(Res.plurals.rooms, h.rooms.size, h.rooms.size),
-                            if (heating > 0) stringResource(Res.string.heating_count, heating)
-                            else stringResource(Res.string.idle),
-                        ).joinToString(" · ")
-                    )
+                // Title, subtitle and weather in one row, so the weather sits centred beside both, expanded or collapsed.
+                // The bar composes this slot twice with different text styles; the subtitle follows the size it gets.
+                title = {
+                    val h = model.home
+                    val expanded = LocalTextStyle.current.fontSize > MaterialTheme.typography.titleLarge.fontSize
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(h?.device ?: "OnlyHeat")
+                            if (h != null) {
+                                val heating = h.rooms.count { it.heating && it.target != null }
+                                Text(
+                                    listOfNotNull(
+                                        pluralStringResource(Res.plurals.rooms, h.rooms.size, h.rooms.size),
+                                        if (heating > 0) stringResource(Res.string.heating_count, heating)
+                                        else stringResource(Res.string.idle),
+                                    ).joinToString(" · "),
+                                    style = if (expanded) MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
+                        val outside = h?.outdoorTemp ?: model.weather?.temp
+                        if (outside != null) WeatherPill(model.weather?.emoji, outside, big = expanded)
+                    }
                 },
+                // The subtitle lives in the title slot, so keep the height the bar gives a real subtitle.
+                expandedHeight = TopAppBarDefaults.LargeFlexibleAppBarWithSubtitleExpandedHeight,
                 scrollBehavior = scroll,
             )
         },

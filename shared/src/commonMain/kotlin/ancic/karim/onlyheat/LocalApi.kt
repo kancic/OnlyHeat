@@ -111,6 +111,9 @@ class LocalApi(
 
     suspend fun schedule(): Schedule = withController { readSchedule("http://" + it.host) }
 
+    /** AccuWeather's "Current Conditions" from the dashboard (firmware 1.0.9.2.0+). */
+    suspend fun weather(): Weather = withController { parseWeather(get("http://${it.host}/dashboard").bodyAsText()) }
+
     /** Reads the selected controller's Setup page without saving credentials before cloud login. */
     internal suspend fun apiPin(selected: DashboardTarget): VerifiedDashboard = withController(selected) {
         val apiPin = parseApiPin(get("http://${it.host}/setup").bodyAsText()) ?: throw NoApiPin()
@@ -196,6 +199,32 @@ internal suspend fun waitForRecovery(
         back.await().also { local.cancel(); cloud.cancel() }
     }
 } ?: false
+
+data class Weather(val temp: Double?, val emoji: String?)
+
+// The first "Temperature:" and icon are Current Conditions; forecast cards follow. Blank (old firmware) → nulls.
+internal fun parseWeather(html: String) = Weather(
+    Regex("""Temperature:</small>\s*<strong[^>]*>\s*(-?\d+(?:\.\d+)?)""").find(html)?.groupValues?.get(1)?.toDoubleOrNull(),
+    Regex("""accuweather\.com/\S*/icons/(\d+)\.svg""").find(html)?.groupValues?.get(1)?.toInt()?.let(::weatherEmoji),
+)
+
+// AccuWeather icon codes: developer.accuweather.com/weather-icons. 0 ("00.svg") means no data.
+internal fun weatherEmoji(icon: Int): String? = when (icon) {
+    1, 2, 30 -> "☀️"
+    3, 4, 5 -> "🌤️"
+    6 -> "🌥️"
+    7, 8, 38 -> "☁️"
+    11 -> "🌫️"
+    12, 13, 14, 18, 39, 40 -> "🌧️"
+    15, 16, 17, 41, 42 -> "⛈️"
+    19, 20, 21, 22, 23, 43, 44 -> "🌨️"
+    24, 25, 26, 29 -> "🧊"
+    31 -> "🥶"
+    32 -> "💨"
+    33, 34 -> "🌙"
+    35, 36, 37 -> "☁️"
+    else -> null
+}
 
 internal fun parseApiPin(html: String): String? =
     Regex("""id="apiPin"\s*>\s*(\w+)\s*<""").find(html)?.groupValues?.get(1)
