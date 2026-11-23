@@ -108,6 +108,7 @@
     <string name="pin_saved">Spremljen</string>
     <string name="pin_not_set">Nije postavljen</string>
     <string name="change">Promijeni</string>
+    <string name="edit_pin">Uredi PIN</string>
     <string name="account">Račun</string>
     <string name="account_desc">Prijavljeni ste u TTO oblak svojim API PIN-om.</string>
     <string name="diag_title">Provjera veze</string>
@@ -130,7 +131,7 @@
     <string name="firmware_version">Firmver %1$s</string>
     <string name="firmware_changed_title">Regulator se sam ažurirao</string>
     <string name="firmware_changed_desc">Firmver se promijenio s %1$s na %2$s. Ako raspored, ponovno pokretanje ili pronalaženje regulatora prestanu raditi, ažurirajte OnlyHeat.</string>
-    <string name="lan_controller_title">Regulator na kućnom Wi-Fiju</string>
+    <string name="local_access_title">Lokalni pristup</string>
     <string name="lan_devices_title">Odaberite regulator</string>
     <string name="lan_match_wifi_name">Odaberite regulator prema nazivu njegove Wi-Fi mreže.</string>
     <string name="lan_no_named_devices">Nije pronađen nijedan regulator s nazivom. Pokušajte se spojiti na Wi-Fi mrežu regulatora.</string>

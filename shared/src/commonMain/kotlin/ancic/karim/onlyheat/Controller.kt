@@ -31,6 +31,12 @@ import kotlinx.coroutines.sync.withLock
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 
+private data class PinPrompt(
+    val target: DashboardTarget? = null,
+    val restartAfterSave: Boolean = false,
+    val onSaved: () -> Unit = {},
+)
+
 /** Controller tab: things that talk to the controller's local dashboard, plus the account. */
 @Composable
 fun ControllerTab(
@@ -40,8 +46,7 @@ fun ControllerTab(
 ) {
     val settings = koinInject<Settings>()
     var pin by remember { mutableStateOf(savedPin(settings)) }
-    var askPin by remember { mutableStateOf(false) }
-    var restartAfterPin by remember { mutableStateOf(false) }
+    var pinPrompt by remember { mutableStateOf<PinPrompt?>(null) }
     var confirmRestart by remember { mutableStateOf(false) }
     var restarting by remember { mutableStateOf(false) }
     val controllerPicker = remember { LanControllerPicker(settings) }
@@ -52,10 +57,26 @@ fun ControllerTab(
     val firmware = remember(firmwareSeen) { settings.getStringOrNull(FIRMWARE) }
     val firmwareBefore = remember(firmwareSeen) { settings.getStringOrNull(FIRMWARE_BEFORE) }
 
-    /** Saves the picked controller once its page shows the picked name. null: the user cancelled. */
-    suspend fun chooseController(): Boolean? = attempt { controllerPicker.find(host, change = true) }
-        .also { savedController = settings.savedLanTarget()?.name }
-        .fold({ if (it == null) null else true }, { false })
+    /** Stages the verified controller for PIN entry. null: the user cancelled discovery. */
+    suspend fun chooseController(onSaved: () -> Unit = {}, onEditPin: (() -> Unit)? = null): Boolean? {
+        choosing = true
+        return try {
+            if (!requestLocalNetwork()) {
+                if (onEditPin != null) onEditPin()
+                else snackbar.showSnackbar(getString(Res.string.local_permission_denied))
+                null
+            } else {
+                attempt { controllerPicker.find(host, change = true, save = false, onEditPin = onEditPin) }.fold(
+                    { target -> target?.let { pinPrompt = PinPrompt(it, onSaved = onSaved); true } },
+                    { false },
+                )
+            }
+        } finally {
+            choosing = false
+        }
+    }
+
+    val localAccessBusy = choosing || restarting || pinPrompt != null
 
     fun restart() {
         val p = pin ?: run {
@@ -64,8 +85,8 @@ fun ControllerTab(
             scope.launch {
                 try {
                     if (!requestLocalNetwork()) snackbar.showSnackbar(getString(Res.string.local_permission_denied))
-                    else attempt { controllerPicker.find(host) }
-                        .onSuccess { if (it != null) { savedController = settings.savedLanTarget()?.name; restartAfterPin = true; askPin = true } }
+                    else attempt { controllerPicker.find(host, save = false) }
+                        .onSuccess { if (it != null) pinPrompt = PinPrompt(it, restartAfterSave = true) }
                         .onFailure { snackbar.showSnackbar(errorText(it)) }
                 } finally {
                     restarting = false
@@ -124,7 +145,7 @@ fun ControllerTab(
             }
 
             DiagnosticsCard(
-                Modifier.springIn(0), host, settings, ::chooseController, requestLocalNetwork, cloudStatus, restarting,
+                Modifier.springIn(0), host, settings, { chooseController(it) }, requestLocalNetwork, cloudStatus, localAccessBusy,
                 onChecked = { firmwareSeen++ },
             ) {
                 confirmRestart = true
@@ -138,48 +159,38 @@ fun ControllerTab(
             }
 
             Section(stringResource(Res.string.restart_card_title), stringResource(Res.string.restart_card_desc), modifier = Modifier.springIn(3), container = MaterialTheme.colorScheme.primaryContainer) {
-                FilledTonalButton({ confirmRestart = true }, enabled = !restarting, shapes = ButtonDefaults.shapes(),
+                FilledTonalButton({ confirmRestart = true }, enabled = !localAccessBusy, shapes = ButtonDefaults.shapes(),
                     colors = onCardTonal()) {
                     Text(stringResource(Res.string.restart))
                 }
             }
 
+            // One card for the controller and its dashboard PIN: picking another controller asks for its PIN too.
             Section(
-                stringResource(Res.string.dashboard_pin),
-                stringResource(if (pin != null) Res.string.pin_saved else Res.string.pin_not_set),
-                modifier = Modifier.springIn(4),
-            ) {
-                TextButton({ restartAfterPin = false; askPin = true }, shapes = ButtonDefaults.shapes()) {
-                    Text(stringResource(Res.string.change))
-                }
-            }
-
-            Section(
-                stringResource(Res.string.lan_controller_title),
+                stringResource(Res.string.local_access_title),
                 listOfNotNull(
                     savedController ?: stringResource(Res.string.pin_not_set),
                     firmware?.let { stringResource(Res.string.firmware_version, it) },
+                    stringResource(Res.string.dashboard_pin) + ": " +
+                        stringResource(if (pin != null) Res.string.pin_saved else Res.string.pin_not_set),
                 ).joinToString("\n"),
-                modifier = Modifier.springIn(5),
+                modifier = Modifier.springIn(4),
             ) {
                 TextButton({
-                    choosing = true
                     scope.launch {
-                        try {
-                            when {
-                                !requestLocalNetwork() -> snackbar.showSnackbar(getString(Res.string.local_permission_denied))
-                                chooseController() == false -> snackbar.showSnackbar(getString(Res.string.schedule_unreachable))
-                            }
-                        } finally {
-                            choosing = false
+                        val editPin: (() -> Unit)? = if (savedController != null || pin != null) {
+                            { pinPrompt = PinPrompt() }
+                        } else null
+                        if (chooseController(onEditPin = editPin) == false) {
+                            snackbar.showSnackbar(getString(Res.string.schedule_unreachable))
                         }
                     }
-                }, enabled = !choosing && !restarting, shapes = ButtonDefaults.shapes()) {
+                }, enabled = !localAccessBusy, shapes = ButtonDefaults.shapes()) {
                     Text(stringResource(Res.string.change))
                 }
             }
 
-            Section(stringResource(Res.string.account), stringResource(Res.string.account_desc), modifier = Modifier.springIn(6)) {
+            Section(stringResource(Res.string.account), stringResource(Res.string.account_desc), modifier = Modifier.springIn(5)) {
                 OutlinedButton(onLogout, shapes = ButtonDefaults.shapes()) { Text(stringResource(Res.string.log_out)) }
             }
           }
@@ -203,26 +214,39 @@ fun ControllerTab(
         title = { Text(stringResource(Res.string.restarting)) },
         text = { Text(stringResource(Res.string.restarting_hint)) },
     )
-    if (askPin) PinDialog(
-        onDismiss = { askPin = false },
-        onPin = {
-            savePin(settings, it); pin = it; askPin = false
-            if (restartAfterPin) restart()
-        },
-    )
+    pinPrompt?.let { prompt ->
+        PinDialog(
+            onDismiss = { pinPrompt = null },
+            onPin = {
+                prompt.target?.let { target ->
+                    settings.rememberLanTarget(target, host)
+                    savedController = settings.savedLanTarget()?.name
+                }
+                savePin(settings, it)
+                pin = it
+                pinPrompt = null
+                prompt.onSaved()
+                if (prompt.restartAfterSave) restart()
+            },
+        )
+    }
     controllerPicker.Dialog(host)
 }
 
 internal class LanControllerPicker(private val settings: Settings) {
-    private data class Prompt(val answer: CompletableDeferred<DashboardTarget?>, val homeNetworkFirst: Boolean)
+    private data class Prompt(
+        val answer: CompletableDeferred<DashboardTarget?>,
+        val homeNetworkFirst: Boolean,
+        val onEditPin: (() -> Unit)?,
+    )
 
     private val requests = Mutex()
     private var pending by mutableStateOf<Prompt?>(null)
     val isOpen get() = pending != null
 
-    suspend fun ask(homeNetworkFirst: Boolean = false): DashboardTarget? = requests.withLock {
+    suspend fun ask(homeNetworkFirst: Boolean = false, onEditPin: (() -> Unit)? = null): DashboardTarget? = requests.withLock {
         val answer = CompletableDeferred<DashboardTarget?>()
-        pending = Prompt(answer, homeNetworkFirst)
+        pending = Prompt(answer, homeNetworkFirst, onEditPin)
         try {
             answer.await()
         } finally {
@@ -232,36 +256,50 @@ internal class LanControllerPicker(private val settings: Settings) {
 
     /**
      * The controller to use, found before any PIN is asked for: the saved one or the hotspot when either answers,
-     * otherwise the one the user picks by name ([change] always asks). Saved when [save], so the dashboard login goes
+     * otherwise the one the user picks by name ([change] asks unless the phone is on a controller's own Wi-Fi). Saved when [save], so the dashboard login goes
      * there. null: the user cancelled. Throws [ControllerUnreachable] when the picked one doesn't answer as itself.
      */
-    suspend fun find(hotspot: String, change: Boolean = false, save: Boolean = true): DashboardTarget? {
-        val found = (if (change) null else resolveDashboard(hotspot, settings)?.first) ?: run {
-            val chosen = ask(homeNetworkFirst = true) ?: return null
+    suspend fun find(
+        hotspot: String, change: Boolean = false, save: Boolean = true, onEditPin: (() -> Unit)? = null,
+    ): DashboardTarget? {
+        val found = (if (change) onHotspot(hotspot) else resolveDashboard(hotspot, settings)?.first) ?: run {
+            val chosen = ask(homeNetworkFirst = true, onEditPin = onEditPin) ?: return null
             resolveDashboard(hotspot, settings, selected = chosen)?.first ?: throw ControllerUnreachable(null)
         }
         if (save) settings.rememberLanTarget(found, hotspot)
         return found
     }
 
+    /** On the controller's own Wi-Fi there is nothing to choose: joining it picked the controller. */
+    private suspend fun onHotspot(hotspot: String): DashboardTarget? {
+        val name = dashboardProbeClient(currentLanConnection()).use { it.nameOf(hotspot) } ?: return null
+        return DashboardTarget(hotspot, name)
+    }
+
     @Composable
     fun Dialog(hotspot: String) {
-        val (answer, homeNetworkFirst) = pending ?: return
+        val (answer, homeNetworkFirst, onEditPin) = pending ?: return
         val savedName = remember(answer) { settings.savedLanTarget()?.name }
         var useHomeNetwork by remember(answer) { mutableStateOf(homeNetworkFirst || savedName != null) }
         var discovered by remember(answer, hotspot) { mutableStateOf(emptyList<DashboardTarget>()) }
         var wifiNames by remember(answer, hotspot) { mutableStateOf(emptyMap<String, String>()) } // by host
-        var searching by remember(answer, hotspot) { mutableStateOf(false) }
+        var searching by remember(answer, hotspot) { mutableStateOf(useHomeNetwork) }
+        var canEditPin by remember(answer, hotspot) { mutableStateOf(false) }
         // Leaving the home-network page cancels the scan; coming back scans again (e.g. the controller finished booting).
         if (useHomeNetwork) LaunchedEffect(answer, hotspot) {
             discovered = emptyList()
             searching = true
+            canEditPin = false
             val connection = currentLanConnection()
             dashboardProbeClient(connection).use { client ->
-                client.findNamedDashboards(hotspot) { found, wifi ->
+                client.findNamedDashboards { found, wifi ->
                     (wifi ?: settings.knownWifiName(found.name))?.let { wifiNames += found.host to it }
                     discovered = (discovered + found.copy(connectionId = connection?.id)).sortedBy { t -> t.name }
                 }
+            }
+            if (onEditPin != null && discovered.none { it.name == savedName }) {
+                val saved = if (savedName != null) attempt { resolveDashboard(hotspot, settings) }.getOrNull()?.first else null
+                if (saved == null) canEditPin = true else discovered += saved
             }
             searching = false
         }
@@ -310,6 +348,12 @@ internal class LanControllerPicker(private val settings: Settings) {
             confirmButton = {
                 if (!useHomeNetwork) {
                     Button({ answer.complete(DashboardTarget(hotspot, savedName)) }) { Text(stringResource(Res.string.retry)) }
+                } else if (canEditPin && onEditPin != null) {
+                    TextButton({
+                        if (answer.complete(null)) onEditPin()
+                    }) {
+                        Text(stringResource(Res.string.edit_pin))
+                    }
                 }
             },
             dismissButton = {
@@ -385,9 +429,9 @@ private fun PinDialog(onDismiss: () -> Unit, onPin: (String) -> Unit) {
 private enum class Link { Unknown, Ok, Unverified, Down, NoInternet }
 @Composable
 private fun DiagnosticsCard(
-    modifier: Modifier, host: String, settings: Settings, chooseController: suspend () -> Boolean?,
+    modifier: Modifier, host: String, settings: Settings, chooseController: suspend (() -> Unit) -> Boolean?,
     requestLocalNetwork: suspend () -> Boolean, cloudStatus: suspend () -> Throwable?,
-    restarting: Boolean, onChecked: () -> Unit, onRestart: () -> Unit,
+    localAccessBusy: Boolean, onChecked: () -> Unit, onRestart: () -> Unit,
 ) {
     var cloud by remember { mutableStateOf(Link.Unknown) }
     var local by remember { mutableStateOf(Link.Unknown) }
@@ -427,12 +471,7 @@ private fun DiagnosticsCard(
         running = true
         scope.launch {
             try {
-                if (!requestLocalNetwork()) {
-                    local = Link.Down
-                    return@launch
-                }
-                val found = chooseController() ?: return@launch
-                local = if (found) Link.Ok else Link.Down
+                if (chooseController { local = Link.Ok } == false) local = Link.Down
             } finally {
                 running = false
             }
@@ -447,7 +486,7 @@ private fun DiagnosticsCard(
                 LinkRow(stringResource(Res.string.diag_cloud), cloud)
                 LinkRow(
                     stringResource(Res.string.diag_local), local,
-                    onClick = if (local == Link.Unverified && !running && !restarting) ::pickController else null,
+                    onClick = if (local == Link.Unverified && !running && !localAccessBusy) ::pickController else null,
                 )
                 val verdict = when {
                     cloud == Link.NoInternet -> Res.string.diag_verdict_no_internet
@@ -460,7 +499,7 @@ private fun DiagnosticsCard(
                 Text(stringResource(verdict), style = MaterialTheme.typography.bodyLarge)
                 // Unverified too: the restart asks which controller it is.
                 if (cloud == Link.Down && local in setOf(Link.Ok, Link.Unverified)) FilledTonalButton(
-                    onRestart, enabled = !restarting && !running, shapes = ButtonDefaults.shapes(),
+                    onRestart, enabled = !localAccessBusy && !running, shapes = ButtonDefaults.shapes(),
                     colors = onCardTonal(),
                 ) { Text(stringResource(Res.string.restart)) }
             }

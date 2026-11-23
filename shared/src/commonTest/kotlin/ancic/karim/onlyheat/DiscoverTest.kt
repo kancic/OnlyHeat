@@ -174,6 +174,20 @@ class DiscoverTest {
         assertEquals(listOf(DashboardTarget(hotspot, name)), probed)
     }
 
+    @Test fun aDifferentControllerFromThePickerCannotReceiveTheSavedPin() = runTest {
+        val name = "TTO Advance-A1B2C3"
+        val other = DashboardTarget("192.168.100.50", "TTO Advance-ABC123")
+        val probed = mutableListOf<DashboardTarget>()
+        assertNull(dashboardAddress(HOTSPOT, { other }, remembered = other, hotspotName = name) {
+            probed += it
+            it == other
+        })
+        assertEquals(listOf(DashboardTarget(HOTSPOT, name)), probed)
+
+        val moved = other.copy(name = name)
+        assertEquals(moved, dashboardAddress(HOTSPOT, { moved }, hotspotName = name) { it == moved })
+    }
+
     @Test fun cloudRecoveryCancelsPendingLocalVerification() = runTest {
         var cloudChecks = 0
         var localCancelled = false

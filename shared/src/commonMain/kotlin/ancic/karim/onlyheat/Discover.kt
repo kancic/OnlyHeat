@@ -96,9 +96,10 @@ internal fun Settings.savedLanTarget() = savedLanTarget(getStringOrNull(SAVED_LA
 internal fun Settings.knownWifiName(device: String?) = device?.let { getStringOrNull("wifiName.$it") }
 internal fun Settings.rememberWifiName(device: String, ssid: String) = putString("wifiName.$device", ssid)
 
-/** The hotspot needs no saving: it is always tried. */
+/** Remember the hotspot's identity, keeping a home Wi-Fi address for the same controller if we have one. */
 internal fun Settings.rememberLanTarget(target: DashboardTarget, hotspot: String) {
-    if (target.host != hotspot) target.rememberedValue()?.let { putString(SAVED_LAN_TARGET, it) }
+    if (target.host == hotspot && savedLanTarget()?.name == target.name) return
+    target.rememberedValue()?.let { putString(SAVED_LAN_TARGET, it) }
 }
 
 private suspend fun HttpClient.dashboardPage(host: String): String? {
@@ -110,13 +111,14 @@ private suspend fun HttpClient.dashboardPage(host: String): String? {
 }
 
 internal suspend fun HttpClient.firmwareOf(host: String): String? = dashboardPage(host)?.let(::dashboardFirmware)
+internal suspend fun HttpClient.nameOf(host: String): String? = dashboardPage(host)?.let(::dashboardName)
 
 internal suspend fun HttpClient.hasDashboard(host: String, expectedName: String? = null): Boolean =
     dashboardPage(host)?.let { expectedName == null || dashboardName(it) == expectedName } == true
 
-private suspend fun lanHosts(exclude: String): List<String> {
+private suspend fun lanHosts(exclude: String? = null): List<String> {
     val addrs = attempt { localIpv4s() }.getOrElse { log("cannot list network interfaces", it); emptyList() }
-    return scanHosts(addrs) - exclude
+    return scanHosts(addrs).filter { it != exclude }
 }
 
 /** A matching page is a discovery hint. The user must identify their own controller. */
@@ -124,10 +126,11 @@ internal suspend fun HttpClient.findLanDashboard(exclude: String, expectedName: 
     firstDashboard(lanHosts(exclude)) { hasDashboard(it, expectedName) }
 
 /** Reports each controller, with its own Wi-Fi name when it gives one, as it answers: live hosts reply in well
- *  under a second, the dead ones only time out. */
-internal suspend fun HttpClient.findNamedDashboards(exclude: String, found: (DashboardTarget, String?) -> Unit) {
-    probeHosts(lanHosts(exclude)) { host ->
-        dashboardPage(host)?.let(::dashboardName)?.let { found(DashboardTarget(host, it), wifiName(host)) }
+ *  under a second, the dead ones only time out. The hotspot address is scanned too: on the controller's own Wi-Fi
+ *  the controller is there. */
+internal suspend fun HttpClient.findNamedDashboards(found: (DashboardTarget, String?) -> Unit) {
+    probeHosts(lanHosts()) { host ->
+        nameOf(host)?.let { found(DashboardTarget(host, it), wifiName(host)) }
     }
 }
 
@@ -177,9 +180,9 @@ internal suspend fun dashboardAddress(
 ): DashboardTarget? {
     suspend fun DashboardTarget.usable() = isPrivateIpv4(host) && probe(this)
     if (selected != null) return selected.takeIf { it.usable() }
-    remembered?.let { if (it.usable()) return it }
+    remembered?.let { if ((hotspotName == null || it.name == hotspotName) && it.usable()) return it }
     DashboardTarget(hotspot, hotspotName).let { if (it.usable()) return it }
-    return confirmedLanAddress()?.takeIf { it.usable() }
+    return confirmedLanAddress()?.takeIf { (hotspotName == null || it.name == hotspotName) && it.usable() }
 }
 
 /** Resolves a controller without credentials. An explicit selection allows no fallback. */
@@ -195,7 +198,9 @@ internal suspend fun resolveDashboard(
     val target = dashboardAddress(
         hotspot, confirm,
         // The saved controller on whatever Wi-Fi the phone is on now: login still checks it shows the saved name.
-        remembered = if (selected == null) recent ?: saved?.copy(connectionId = currentLanConnection()?.id) else null,
+        remembered = if (selected == null) {
+            recent ?: saved?.takeUnless { it.host == hotspot }?.copy(connectionId = currentLanConnection()?.id)
+        } else null,
         hotspotName = saved?.name,
         selected = selected,
     ) { candidate ->

@@ -108,6 +108,7 @@
     <string name="pin_saved">Saved</string>
     <string name="pin_not_set">Not set</string>
     <string name="change">Change</string>
+    <string name="edit_pin">Edit PIN</string>
     <string name="account">Account</string>
     <string name="account_desc">Signed in to the TTO cloud with your API PIN.</string>
     <string name="diag_title">Connection check</string>
@@ -130,7 +131,7 @@
     <string name="firmware_version">Firmware %1$s</string>
     <string name="firmware_changed_title">The controller updated itself</string>
     <string name="firmware_changed_desc">Its firmware changed from %1$s to %2$s. If the schedule, restart or finding the controller stop working, update OnlyHeat.</string>
-    <string name="lan_controller_title">Home Wi-Fi controller</string>
+    <string name="local_access_title">Local access</string>
     <string name="lan_devices_title">Choose your controller</string>
     <string name="lan_match_wifi_name">Choose your controller by its Wi-Fi name.</string>
     <string name="lan_no_named_devices">No named controllers found. Try the controller’s own Wi-Fi.</string>

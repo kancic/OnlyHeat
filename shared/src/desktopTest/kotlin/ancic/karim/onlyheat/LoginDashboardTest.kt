@@ -50,4 +50,21 @@ class LoginDashboardTest {
             node.removeNode()
         }
     }
+
+    @Test fun remembersTheHotspotIdentityAndKeepsTheSameControllersHomeAddress() {
+        val node = Preferences.userRoot().node("onlyheat-test-${UUID.randomUUID()}")
+        try {
+            val settings = PreferencesSettings(node)
+            val home = DashboardTarget("192.168.100.49", "TTO Advance-A1B2C3")
+            settings.rememberLanTarget(home, HOTSPOT)
+            settings.rememberLanTarget(home.copy(host = HOTSPOT), HOTSPOT)
+            assertEquals(home, settings.savedLanTarget())
+
+            val other = DashboardTarget(HOTSPOT, "TTO Advance-ABC123")
+            settings.rememberLanTarget(other, HOTSPOT)
+            assertEquals(other, settings.savedLanTarget())
+        } finally {
+            node.removeNode()
+        }
+    }
 }

@@ -74,8 +74,7 @@ class LocalApi(
             // Logged in, so the Wi-Fi name is readable on any firmware: keep it for the controller picker.
             name?.let { device -> http.wifiName(target.host)?.let { settings.rememberWifiName(device, it) } }
             if (selected == null) {
-                lastTarget = target
-                settings.rememberLanTarget(target, host)
+                lastTarget = target.copy(name = name).also { settings.rememberLanTarget(it, host) }
             }
             reach { http.block(target) }
         }
