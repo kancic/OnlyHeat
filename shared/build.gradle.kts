@@ -43,6 +43,8 @@ kotlin {
             implementation(libs.navigation3.ui)
             implementation(libs.kotlinx.datetime)
             implementation(libs.lifecycle.runtime.compose)
+            implementation(libs.lifecycle.viewmodel.compose)
+            implementation(libs.lifecycle.viewmodel.navigation3)
             implementation(libs.room3.runtime)
             implementation(libs.sqlite.bundled)
         }

@@ -1,7 +1,14 @@
 package ancic.karim.onlyheat
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class ScheduleTest {
     // The controller's real /scheduler form (whitespace collapsed), captured 2026-11-21.
@@ -48,5 +55,30 @@ class ScheduleTest {
 
     @Test fun truncatedPageStillParses() {
         assertEquals(parseSchedule(page).entries, parseSchedule(page.replace("</form>", "")).entries)
+    }
+
+    @Test fun interruptedSaveRefreshesBaselineAndKeepsRevertedDraft() = runTest {
+        val original = parseSchedule(page)
+        val editor = ScheduleModel()
+        editor.showSchedule(original)
+        assertFalse(editor.needsLoad)
+        editor.entries[0] = editor.entries[0].copy(target = 24.0)
+
+        val stored = CompletableDeferred<Schedule>()
+        val save = launch {
+            editor.save { sent ->
+                stored.complete(original.copy(entries = sent))
+                awaitCancellation()
+            }
+        }
+        val controllerSchedule = stored.await()
+        editor.entries[0] = original.entries[0]
+        save.cancelAndJoin()
+
+        assertTrue(editor.needsLoad)
+        editor.showSchedule(controllerSchedule)
+        assertFalse(editor.needsLoad)
+        assertEquals(controllerSchedule.entries, editor.saved.value)
+        assertEquals(original.entries, editor.entries.toList())
     }
 }

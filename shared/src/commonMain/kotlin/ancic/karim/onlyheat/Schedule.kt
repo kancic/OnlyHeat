@@ -14,6 +14,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.russhwolf.settings.Settings
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalTime
@@ -27,11 +29,43 @@ private val DAYS = listOf(
     "Sat" to Res.string.day_sat, "Sun" to Res.string.day_sun,
 )
 
-private sealed interface Load {
+internal sealed interface Load {
     data object Busy : Load
     data object NeedPin : Load
     data class Failed(val message: String) : Load
     data object Ready : Load
+}
+
+/** What the schedule editor shows, including unsaved edits, so a theme or language change keeps them. */
+internal class ScheduleModel : ViewModel() {
+    val state = mutableStateOf<Load>(Load.Busy)
+    val rooms = mutableStateOf(emptyList<Pair<String, String>>())
+    val saved = mutableStateOf(emptyList<ScheduleEntry>())
+    val entries = mutableStateListOf<ScheduleEntry>()
+    val wrongPin = mutableStateOf(false)
+    private var needsRefresh = false
+    val needsLoad get() = state.value != Load.Ready || needsRefresh
+
+    fun showSchedule(schedule: Schedule, keepEdits: Boolean = needsRefresh || entries.toList() != saved.value) {
+        rooms.value = schedule.rooms
+        saved.value = schedule.entries
+        if (!keepEdits) {
+            entries.clear()
+            entries.addAll(schedule.entries)
+        }
+        needsRefresh = false
+        state.value = Load.Ready
+    }
+
+    suspend fun save(store: suspend (List<ScheduleEntry>) -> Schedule?): Result<Unit> {
+        needsRefresh = true
+        val sent = entries.toList()
+        return attempt {
+            val schedule = store(sent)
+            if (schedule != null) showSchedule(schedule, keepEdits = false)
+            else saved.value = sent // stored, but the read-back failed
+        }.also { needsRefresh = false } // attempt rethrows cancellation, leaving the refresh pending
+    }
 }
 
 /** Edits the controller's schedule through its local dashboard (reachable on its Wi-Fi or the home Wi-Fi). */
@@ -41,22 +75,15 @@ fun ScheduleScreen(host: String, requestLocalNetwork: suspend () -> Boolean, onB
     val controllerPicker = remember { LanControllerPicker(settings) }
     var pin by remember { mutableStateOf(savedPin(settings)) }
     val local = remember(host, pin) { pin?.let { LocalApi(host, it, settings) { controllerPicker.ask() } } }
-    var state by remember { mutableStateOf<Load>(Load.Busy) }
-    var rooms by remember { mutableStateOf(emptyList<Pair<String, String>>()) }
-    var saved by remember { mutableStateOf(emptyList<ScheduleEntry>()) }
-    val entries = remember { mutableStateListOf<ScheduleEntry>() }
-    var saving by remember { mutableStateOf(false) }
-    var wrongPin by remember { mutableStateOf(false) }
+    val m = viewModel { ScheduleModel() }
+    var state by m.state
+    val rooms by m.rooms
+    val saved by m.saved
+    val entries = m.entries
+    var saving by remember { mutableStateOf(false) } // not in the model: a recreation cancels the save
+    var wrongPin by m.wrongPin
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
-
-    // Unsaved edits survive a reload (e.g. after re-entering a wrong PIN during Save) and stay saveable.
-    fun showSchedule(schedule: Schedule, keepEdits: Boolean = entries.toList() != saved) {
-        rooms = schedule.rooms
-        saved = schedule.entries
-        if (!keepEdits) { entries.clear(); entries.addAll(saved) }
-        state = Load.Ready
-    }
 
     fun clearWrongPin() {
         savePin(settings, null)
@@ -77,7 +104,7 @@ fun ScheduleScreen(host: String, requestLocalNetwork: suspend () -> Boolean, onB
                 state = Load.NeedPin
                 return
             }
-            showSchedule(api.schedule())
+            m.showSchedule(api.schedule())
         } catch (e: WrongDashboardPin) {
             clearWrongPin()
         } catch (e: Exception) {
@@ -86,7 +113,7 @@ fun ScheduleScreen(host: String, requestLocalNetwork: suspend () -> Boolean, onB
         }
     }
 
-    LaunchedEffect(local) { load() }
+    LaunchedEffect(local) { if (m.needsLoad) load() }
     controllerPicker.Dialog(host)
 
     val scroll = collapsingBar()
@@ -122,10 +149,7 @@ fun ScheduleScreen(host: String, requestLocalNetwork: suspend () -> Boolean, onB
                     onClick = {
                         saving = true
                         scope.launch {
-                            attempt {
-                                val sent = entries.toList()
-                                local!!.save(sent)?.let { showSchedule(it, keepEdits = false) }
-                                    ?: run { saved = sent } // stored, but the read-back failed
+                            m.save { local!!.save(it) }.onSuccess {
                                 snackbar.showSnackbar(getString(Res.string.schedule_saved))
                             }.onFailure {
                                 if (it is WrongDashboardPin) clearWrongPin()

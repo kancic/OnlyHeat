@@ -28,7 +28,14 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.backhandler.BackHandler
@@ -80,6 +87,18 @@ private sealed interface Screen {
     data object ScheduleEditor : Screen
 }
 
+private val backStackSaver = listSaver<SnapshotStateList<Screen>, String>(
+    save = { stack -> stack.map { if (it is Screen.RoomDetail) "room:${it.id}" else it.toString() } },
+    restore = { saved ->
+        saved.map { s ->
+            when {
+                s.startsWith("room:") -> Screen.RoomDetail(s.removePrefix("room:")); s == "ScheduleEditor" -> Screen.ScheduleEditor; else -> Screen.Main
+            }
+        }
+            .toMutableStateList()
+    },
+)
+
 private enum class Tab(val label: StringResource, val icon: ImageVector) {
     Rooms(Res.string.tab_rooms, HomeIcon),
     History(Res.string.history, ChartIcon),
@@ -110,7 +129,11 @@ fun App(
             var key by remember { mutableStateOf(settings.getStringOrNull("authKey")) }
             val api = remember { HeatApi() }
             val k = key
-            if (k == null) LoginScreen(api, requestLocalNetwork, statusBarOnDark) { settings.putString("authKey", it); key = it }
+            if (k == null) LoginScreen(
+                api,
+                requestLocalNetwork,
+                statusBarOnDark
+            ) { settings.putString("authKey", it); key = it }
             else Main(api, k, requestLocalNetwork, notify, wakeAt, backgroundAlerts) {
                 settings.remove("authKey")
                 key = null
@@ -119,15 +142,25 @@ fun App(
     }
 }
 
-/** Room state and writes; outlives tab switches and pushed screens. */
+/**
+ * Room state and writes; outlives tab switches, pushed screens and activity recreation.
+ * The callbacks come from the current composition (they hold the activity), so [Main] re-assigns them
+ * on every composition instead of the model keeping the first activity's.
+ */
 private class HomeModel(
-    private val api: HeatApi, private val key: String,
-    private val scope: CoroutineScope, val snackbar: SnackbarHostState,
-    private val settings: Settings,
-    private val visible: () -> Boolean, private val notify: (suspend (String) -> Unit)?,
-    private val wakeAt: ((Long) -> Unit)?,
-    private val onLoggedOut: () -> Unit,
-) {
+    private val api: HeatApi,
+    private val key: String,
+    private val settings: Settings
+) : ViewModel() {
+    // Writes must finish even if the user leaves right after tapping (Back within the 700 ms debounce),
+    // so not viewModelScope, which is cancelled when the activity finishes.
+    // ponytail: never cancelled, lives as long as the process; fine for a few short writes.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    val snackbar = SnackbarHostState()
+    var visible: () -> Boolean = { true }
+    var notify: (suspend (String) -> Unit)? = null
+    var wakeAt: ((Long) -> Unit)? = null
+    var onLoggedOut: () -> Unit = {}
     var away by mutableStateOf(awaySaved(settings) != null)
     var awayBusy by mutableStateOf(false) // Away / I'm back writing; the cards switch once it's done
         private set
@@ -167,7 +200,8 @@ private class HomeModel(
     suspend fun tick() {
         attempt { endExpiredBoosts(api, key, settings) } // load() below reports the error
         boosts = loadBoosts(settings)
-        if (!awayBusy) away = awaySaved(settings) != null // goAway saves first, but shows away only once done
+        if (!awayBusy) away =
+            awaySaved(settings) != null // goAway saves first, but shows away only once done
         load()
         loadWeather(force = false)
         // Keeps the local history gap-free while the app runs (a no-op unless 6 h have passed).
@@ -183,7 +217,8 @@ private class HomeModel(
         val pin = savedPin(settings) ?: return
         weatherAt = nowSeconds()
         attempt { LocalApi(h.ip ?: HOTSPOT, pin, settings) { null }.weather() }
-            .onSuccess { weather = it }.onFailure { weather = null; log("dashboard weather failed", it) }
+            .onSuccess { weather = it }
+            .onFailure { weather = null; log("dashboard weather failed", it) }
     }
 
     /** Lowers every room that is on to [awayTemp] and remembers what each one had. */
@@ -193,7 +228,9 @@ private class HomeModel(
         awayBusy = true
         settings.putDouble("away.temp", awayTemp)
         val boosted = boosts.associateBy { it.room }
-        val saved = h.rooms.associate { it.id to (boosted[it.id]?.restore ?: it.target) } // a boost isn't "theirs"
+        val saved = h.rooms.associate {
+            it.id to (boosted[it.id]?.restore ?: it.target)
+        } // a boost isn't "theirs"
         saveAway(settings, saved) // first, so a crash mid-way can still come back
         boosted.keys.forEach { removeBoost(settings, it) }; boosts = loadBoosts(settings)
         val heated = h.rooms.filter { saved[it.id] != null } // rooms that are off stay off
@@ -203,14 +240,23 @@ private class HomeModel(
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             // Don't leave it half away: undo what was lowered, so Away shows again and can simply be retried.
-            attempt { lowered.forEach { api.setTemp(key, it.id, saved[it.id]) } } // else the error below covers it
+            attempt {
+                lowered.forEach {
+                    api.setTemp(
+                        key,
+                        it.id,
+                        saved[it.id]
+                    )
+                }
+            } // else the error below covers it
             saveAway(settings, null); load(); awayBusy = false
             snackbar.showSnackbar(errorText(e)); return@launch
         }
         delay(4000) // read back, like single rooms
         load()
         away = true; awayBusy = false
-        val kept = home?.rooms.orEmpty().filter { r -> heated.any { it.id == r.id } && r.target != awayTemp }
+        val kept = home?.rooms.orEmpty()
+            .filter { r -> heated.any { it.id == r.id } && r.target != awayTemp }
         snackbar.showSnackbar(
             if (kept.isEmpty()) getString(Res.string.away_set, fmt1(awayTemp))
             else getString(Res.string.away_kept, kept.joinToString { it.name }),
@@ -240,7 +286,8 @@ private class HomeModel(
     /** +2° on top of the room's own target for [minutes], then back. A second boost just extends it. */
     fun boost(room: Room, minutes: Int) {
         val existing = boosts.find { it.room == room.id }
-        val restore = if (existing != null) existing.restore else room.target // null restore = was off, keep it
+        val restore =
+            if (existing != null) existing.restore else room.target // null restore = was off, keep it
         val target = ((restore ?: lastTarget(room.id)) + 2).coerceAtMost(MAX_T)
         val b = Boost(room.id, nowSeconds() + minutes * 60L, target, restore)
         putBoost(settings, b); boosts = loadBoosts(settings)
@@ -258,13 +305,18 @@ private class HomeModel(
     fun lastTarget(roomId: String) = settings.getDouble("lastTarget.$roomId", 21.0)
 
     private fun rememberTarget(roomId: String, t: Double) {
-        if (settings.getDoubleOrNull("lastTarget.$roomId") != t) settings.putDouble("lastTarget.$roomId", t)
+        if (settings.getDoubleOrNull("lastTarget.$roomId") != t) settings.putDouble(
+            "lastTarget.$roomId",
+            t
+        )
     }
 
-    fun refresh() = scope.launch { refreshing = true; load(); refreshing = false; loadWeather(force = true) }
+    fun refresh() =
+        scope.launch { refreshing = true; load(); refreshing = false; loadWeather(force = true) }
 
     fun setTarget(room: Room, target: Double?) {
-        home = home?.let { h -> h.copy(rooms = h.rooms.map { if (it.id == room.id) it.copy(target = target) else it }) }
+        home =
+            home?.let { h -> h.copy(rooms = h.rooms.map { if (it.id == room.id) it.copy(target = target) else it }) }
         if (!away && boosts.none { it.room == room.id }) target?.let { rememberTarget(room.id, it) }
         pending[room.id]?.cancel()
         pending[room.id] = scope.launch {
@@ -284,7 +336,8 @@ private class HomeModel(
             val kept = home?.rooms?.find { it.id == room.id } ?: return@launch
             if (kept.target != target) {
                 val text = keptMessage(kept)
-                if (notify != null && !visible()) notify(text) // user already left the app
+                val n = notify
+                if (n != null && !visible()) n(text) // user already left the app
                 else snackbar.showSnackbar(text, duration = SnackbarDuration.Long)
             }
         }
@@ -301,23 +354,32 @@ private class HomeModel(
 
 @Composable
 private fun Main(
-    api: HeatApi, key: String, requestLocalNetwork: suspend () -> Boolean,
-    notify: (suspend (String) -> Unit)?, wakeAt: ((Long) -> Unit)?, backgroundAlerts: ((Boolean) -> Unit)?,
+    api: HeatApi,
+    key: String,
+    requestLocalNetwork: suspend () -> Boolean,
+    notify: (suspend (String) -> Unit)?,
+    wakeAt: ((Long) -> Unit)?,
+    backgroundAlerts: ((Boolean) -> Unit)?,
     onLogout: () -> Unit,
 ) {
-    // Writes must finish even if the user leaves right after tapping (Back within the 700 ms debounce),
-    // so the model's scope isn't tied to the composition.
-    // ponytail: never cancelled, lives as long as the process; fine for a few short writes.
-    val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
-    val snackbar = remember { SnackbarHostState() }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val model = remember(key) {
-        HomeModel(api, key, scope, snackbar, Settings(), { lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }, notify, wakeAt, onLogout)
-    }
+    val model = viewModel(key = "home:$key") { HomeModel(api, key, Settings()) }
+    model.visible = { lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
+    model.notify = notify
+    model.wakeAt = wakeAt
+    model.onLoggedOut = onLogout
     // Poll only while the app is on screen; resuming refreshes right away.
-    LaunchedEffect(model) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { while (true) { model.tick(); delay(30_000) } } }
+    LaunchedEffect(model) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                model.tick(); delay(30_000)
+            }
+        }
+    }
 
-    val backStack = remember { mutableStateListOf<Screen>(Screen.Main) }
+    // Saveable so a recreation (theme change, process death) reopens the same screen instead of Rooms.
+    val backStack =
+        rememberSaveable(saver = backStackSaver) { mutableStateListOf<Screen>(Screen.Main) }
     var tab by rememberSaveable { mutableStateOf(Tab.Rooms) }
     val host = model.home?.ip ?: HOTSPOT
 
@@ -326,32 +388,55 @@ private fun Main(
     BackHandler(tab != Tab.Rooms && backStack.size == 1) { tab = Tab.Rooms }
 
     SharedTransitionLayout {
-    CompositionLocalProvider(LocalSharedScope provides this) {
-    NavDisplay(
-        backStack = backStack,
-        onBack = { backStack.removeLastOrNull() },
-        sharedTransitionScope = this,
-        entryProvider = { screen ->
-            when (screen) {
-                Screen.Main -> NavEntry(screen) {
-                    MainTabs(tab, { tab = it }, model, api, key, host, requestLocalNetwork, backgroundAlerts, { clearAccountState(Settings()); onLogout() }) {
-                        backStack += it
+        CompositionLocalProvider(LocalSharedScope provides this) {
+            NavDisplay(
+                backStack = backStack,
+                onBack = { backStack.removeLastOrNull() },
+                // Gives each screen its own ViewModels, cleared when it's popped (HomeModel above is the activity's).
+                entryDecorators = listOf(
+                    rememberSaveableStateHolderNavEntryDecorator(),
+                    rememberViewModelStoreNavEntryDecorator()
+                ),
+                sharedTransitionScope = this,
+                entryProvider = { screen ->
+                    when (screen) {
+                        Screen.Main -> NavEntry(screen) {
+                            MainTabs(
+                                tab,
+                                { tab = it },
+                                model,
+                                api,
+                                key,
+                                host,
+                                requestLocalNetwork,
+                                backgroundAlerts,
+                                { clearAccountState(Settings()); onLogout() }) {
+                                backStack += it
+                            }
+                        }
+
+                        is Screen.RoomDetail -> NavEntry(screen) {
+                            val room = model.home?.rooms?.find { it.id == screen.id }
+                            if (room != null) RoomScreen(
+                                api,
+                                key,
+                                room,
+                                model.boosts.find { it.room == room.id },
+                                onBoost = { model.boost(room, it) },
+                                onStopBoost = { model.stopBoost(room) },
+                            ) { backStack.removeLastOrNull() }
+                        }
+
+                        Screen.ScheduleEditor -> NavEntry(screen) {
+                            ScheduleScreen(
+                                host,
+                                requestLocalNetwork
+                            ) { backStack.removeLastOrNull() }
+                        }
                     }
-                }
-                is Screen.RoomDetail -> NavEntry(screen) {
-                    val room = model.home?.rooms?.find { it.id == screen.id }
-                    if (room != null) RoomScreen(
-                        api, key, room, model.boosts.find { it.room == room.id },
-                        onBoost = { model.boost(room, it) }, onStopBoost = { model.stopBoost(room) },
-                    ) { backStack.removeLastOrNull() }
-                }
-                Screen.ScheduleEditor -> NavEntry(screen) {
-                    ScheduleScreen(host, requestLocalNetwork) { backStack.removeLastOrNull() }
-                }
-            }
-        },
-    )
-    }
+                },
+            )
+        }
     }
 }
 
@@ -374,26 +459,46 @@ internal fun Modifier.shared(key: String): Modifier {
 
 @Composable
 private fun MainTabs(
-    tab: Tab, onTab: (Tab) -> Unit, model: HomeModel, api: HeatApi, key: String, host: String,
-    requestLocalNetwork: suspend () -> Boolean, backgroundAlerts: ((Boolean) -> Unit)?, onLogout: () -> Unit,
+    tab: Tab,
+    onTab: (Tab) -> Unit,
+    model: HomeModel,
+    api: HeatApi,
+    key: String,
+    host: String,
+    requestLocalNetwork: suspend () -> Boolean,
+    backgroundAlerts: ((Boolean) -> Unit)?,
+    onLogout: () -> Unit,
     open: (Screen) -> Unit,
 ) {
     val tabContent = @Composable {
-      // M3 fade-through: old tab fades out quickly, new one fades and scales in.
-      AnimatedContent(tab, transitionSpec = {
-          (fadeIn(tween(210, delayMillis = 90)) + scaleIn(tween(210, delayMillis = 90), initialScale = 0.92f)) togetherWith
-              fadeOut(tween(90))
-      }) { tab ->
-        when (tab) {
-            Tab.Rooms -> RoomsTab(model) { open(Screen.RoomDetail(it)) }
-            Tab.History -> OverviewScreen(api, key, model.home?.rooms, model.days) { open(Screen.RoomDetail(it)) }
-            Tab.Controller -> ControllerTab(
-                model.home?.device, host, requestLocalNetwork,
-                cloudStatus = { attempt { api.home(key) }.exceptionOrNull() },
-                snackbar = model.snackbar, backgroundAlerts = backgroundAlerts, onLogout = onLogout,
-            ) { open(Screen.ScheduleEditor) }
+        // M3 fade-through: old tab fades out quickly, new one fades and scales in.
+        AnimatedContent(tab, transitionSpec = {
+            (fadeIn(tween(210, delayMillis = 90)) + scaleIn(
+                tween(210, delayMillis = 90),
+                initialScale = 0.92f
+            )) togetherWith
+                    fadeOut(tween(90))
+        }) { tab ->
+            when (tab) {
+                Tab.Rooms -> RoomsTab(model) { open(Screen.RoomDetail(it)) }
+                Tab.History -> OverviewScreen(
+                    api,
+                    key,
+                    model.home?.rooms,
+                    model.days
+                ) { open(Screen.RoomDetail(it)) }
+
+                Tab.Controller -> ControllerTab(
+                    model.home?.device,
+                    host,
+                    requestLocalNetwork,
+                    cloudStatus = { attempt { api.home(key) }.exceptionOrNull() },
+                    snackbar = model.snackbar,
+                    backgroundAlerts = backgroundAlerts,
+                    onLogout = onLogout,
+                ) { open(Screen.ScheduleEditor) }
+            }
         }
-      }
     }
 
     if (expanded) {
@@ -437,23 +542,34 @@ private fun MainTabs(
 }
 
 /** Insets for a tab's own Scaffold: the bottom is already taken by the navigation bar. */
-internal val TabInsets @Composable get() =
-    WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+internal val TabInsets
+    @Composable get() =
+        WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
 
 /** Outside temperature with the weather icon; the full "Outside …" text is for screen readers. */
 @Composable
 private fun WeatherPill(emoji: String?, outside: Double, big: Boolean) {
     val label = stringResource(Res.string.outside, fmt1(outside))
     Surface(
-        Modifier.padding(start = 12.dp, end = 8.dp).semantics(mergeDescendants = true) { contentDescription = label },
+        Modifier.padding(start = 12.dp, end = 8.dp)
+            .semantics(mergeDescendants = true) { contentDescription = label },
         shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer,
     ) {
-        Row(Modifier.padding(start = 12.dp, end = 16.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.padding(start = 12.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             emoji?.let {
-                Text(it, style = if (big) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleLarge)
+                Text(
+                    it,
+                    style = if (big) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleLarge
+                )
                 Spacer(Modifier.width(6.dp))
             }
-            Text("${fmt1(outside)}°", style = if (big) MaterialTheme.typography.titleLargeEmphasized else MaterialTheme.typography.titleMediumEmphasized)
+            Text(
+                "${fmt1(outside)}°",
+                style = if (big) MaterialTheme.typography.titleLargeEmphasized else MaterialTheme.typography.titleMediumEmphasized
+            )
         }
     }
 }
@@ -469,7 +585,8 @@ private fun RoomsTab(model: HomeModel, openRoom: (String) -> Unit) {
                 // The bar composes this slot twice with different text styles; the subtitle follows the size it gets.
                 title = {
                     val h = model.home
-                    val expanded = LocalTextStyle.current.fontSize > MaterialTheme.typography.titleLarge.fontSize
+                    val expanded =
+                        LocalTextStyle.current.fontSize > MaterialTheme.typography.titleLarge.fontSize
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(h?.device ?: "OnlyHeat")
@@ -477,8 +594,15 @@ private fun RoomsTab(model: HomeModel, openRoom: (String) -> Unit) {
                                 val heating = h.rooms.count { it.heating && it.target != null }
                                 Text(
                                     listOfNotNull(
-                                        pluralStringResource(Res.plurals.rooms, h.rooms.size, h.rooms.size),
-                                        if (heating > 0) stringResource(Res.string.heating_count, heating)
+                                        pluralStringResource(
+                                            Res.plurals.rooms,
+                                            h.rooms.size,
+                                            h.rooms.size
+                                        ),
+                                        if (heating > 0) stringResource(
+                                            Res.string.heating_count,
+                                            heating
+                                        )
                                         else stringResource(Res.string.idle),
                                     ).joinToString(" · "),
                                     style = if (expanded) MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelMedium,
@@ -486,7 +610,11 @@ private fun RoomsTab(model: HomeModel, openRoom: (String) -> Unit) {
                             }
                         }
                         val outside = h?.outdoorTemp ?: model.weather?.temp
-                        if (outside != null) WeatherPill(model.weather?.emoji, outside, big = expanded)
+                        if (outside != null) WeatherPill(
+                            model.weather?.emoji,
+                            outside,
+                            big = expanded
+                        )
                     }
                 },
                 // The subtitle lives in the title slot, so keep the height the bar gives a real subtitle.
@@ -497,15 +625,24 @@ private fun RoomsTab(model: HomeModel, openRoom: (String) -> Unit) {
         contentWindowInsets = TabInsets,
     ) { pad ->
         PullToRefreshBox(
-            model.refreshing, { model.refresh() }, Modifier.padding(pad).fillMaxSize(), state = pull,
+            model.refreshing,
+            { model.refresh() },
+            Modifier.padding(pad).fillMaxSize(),
+            state = pull,
             indicator = {
-                PullToRefreshDefaults.LoadingIndicator(pull, model.refreshing, Modifier.align(Alignment.TopCenter))
+                PullToRefreshDefaults.LoadingIndicator(
+                    pull,
+                    model.refreshing,
+                    Modifier.align(Alignment.TopCenter)
+                )
             },
         ) {
-            val h = model.home
-            when {
-                h == null && model.error != null -> Message(model.error!!) { model.refresh() }
-                h == null -> Box(Modifier.fillMaxSize(), Alignment.Center) { LoadingIndicator(Modifier.size(64.dp)) }
+            when (val h = model.home) {
+                null if model.error != null -> Message(model.error!!) { model.refresh() }
+                null -> Box(
+                    Modifier.fillMaxSize(),
+                    Alignment.Center
+                ) { LoadingIndicator(Modifier.size(64.dp)) }
                 // Adaptive: one column on a phone, two or more on wider windows.
                 // The app bar listens inside the refresh box, so a downward drag first expands the
                 // collapsed bar and only then pulls to refresh.
@@ -519,16 +656,49 @@ private fun RoomsTab(model: HomeModel, openRoom: (String) -> Unit) {
                     ) {
                         val span: (androidx.compose.foundation.lazy.grid.LazyGridItemSpanScope.() -> GridItemSpan) =
                             { GridItemSpan(maxLineSpan) }
-                        model.error?.let { e -> item(span = span) { Text(e, color = MaterialTheme.colorScheme.error) } }
-                        if (model.away) item(span = span) { AwayOnCard(model.awayTemp, model.awayBusy, Modifier.springIn(0), model::comeBack) }
+                        model.error?.let { e ->
+                            item(span = span) {
+                                Text(
+                                    e,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                        if (model.away) item(span = span) {
+                            AwayOnCard(
+                                model.awayTemp,
+                                model.awayBusy,
+                                Modifier.springIn(0),
+                                model::comeBack
+                            )
+                        }
                         if (h.rooms.size > 1 && !model.away) item {
-                            QuickCard(stringResource(Res.string.all_rooms), model.allTarget, { model.allTarget = it }, stringResource(Res.string.set_all), Modifier.springIn(0)) { model.setAll(model.allTarget) }
+                            QuickCard(
+                                stringResource(Res.string.all_rooms),
+                                model.allTarget,
+                                { model.allTarget = it },
+                                stringResource(Res.string.set_all),
+                                Modifier.springIn(0)
+                            ) { model.setAll(model.allTarget) }
                         }
                         if (!model.away) item {
-                            QuickCard(stringResource(Res.string.away_title), model.awayTemp, { model.awayTemp = it }, stringResource(Res.string.away_go), Modifier.springIn(1), model.awayBusy, model::goAway)
+                            QuickCard(
+                                stringResource(Res.string.away_title),
+                                model.awayTemp,
+                                { model.awayTemp = it },
+                                stringResource(Res.string.away_go),
+                                Modifier.springIn(1),
+                                model.awayBusy,
+                                model::goAway
+                            )
                         }
                         itemsIndexed(h.rooms, key = { _, r -> r.id }) { i, r ->
-                            RoomCard(r, model.boosts.any { it.room == r.id }, { model.lastTarget(r.id) }, Modifier.springIn(i + 2), onOpen = { openRoom(r.id) }) { t -> model.setTarget(r, t) }
+                            RoomCard(
+                                r,
+                                model.boosts.any { it.room == r.id },
+                                { model.lastTarget(r.id) },
+                                Modifier.springIn(i + 2),
+                                onOpen = { openRoom(r.id) }) { t -> model.setTarget(r, t) }
                         }
                         if (h.rooms.isEmpty()) item(span = span) { Text(stringResource(Res.string.no_rooms)) }
                     }
@@ -540,7 +710,10 @@ private fun RoomsTab(model: HomeModel, openRoom: (String) -> Unit) {
 
 @Composable
 private fun LoginScreen(
-    api: HeatApi, requestLocalNetwork: suspend () -> Boolean, statusBarOnDark: (Boolean) -> Unit, onKey: (String) -> Unit,
+    api: HeatApi,
+    requestLocalNetwork: suspend () -> Boolean,
+    statusBarOnDark: (Boolean) -> Unit,
+    onKey: (String) -> Unit,
 ) {
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -557,16 +730,19 @@ private fun LoginScreen(
         attempt { api.login(submittedPin) }
             .onSuccess { settings.saveLoginDashboard(submittedPin, pendingDashboard); onKey(it) }
             .onFailure {
-                error = if (it is ApiException && it.message?.contains("PIN") == true) getString(Res.string.pin_wrong)
-                else errorText(it)
+                error =
+                    if (it is ApiException && it.message?.contains("PIN") == true) getString(Res.string.pin_wrong)
+                    else errorText(it)
             }
     }
+
     fun connect() {
         if (busy) return
         val submittedPin = pin
         busy = true
         scope.launch { login(submittedPin); busy = false }
     }
+
     // The other way in: pick the controller (its own Wi-Fi or the home Wi-Fi), then read the API PIN from its dashboard.
     fun onLan(block: suspend () -> Unit) {
         if (busy) return
@@ -578,12 +754,14 @@ private fun LoginScreen(
             busy = false
         }
     }
+
     fun findController(change: Boolean) = onLan {
         controllerPicker.find(HOTSPOT, change, save = false)?.let {
             if (it != controller) dashboardPin = ""
             controller = it
         }
     }
+
     fun fromController() {
         val selected = controller ?: return
         val submittedPin = dashboardPin
@@ -602,12 +780,22 @@ private fun LoginScreen(
             if (error != null) way = LoginWay.Manual
         }
     }
+
     val form: @Composable (Modifier) -> Unit = { modifier ->
         LoginForm(
-            modifier, way, { way = it; error = null },
-            pin, { pin = it.trim(); error = null }, dashboardPin, { dashboardPin = it; error = null },
-            controller, ::findController,
-            error, busy, ::connect, ::fromController,
+            modifier,
+            way,
+            { way = it; error = null },
+            pin,
+            { pin = it.trim(); error = null },
+            dashboardPin,
+            { dashboardPin = it; error = null },
+            controller,
+            ::findController,
+            error,
+            busy,
+            ::connect,
+            ::fromController,
         )
     }
     controllerPicker.Dialog(HOTSPOT)
@@ -626,10 +814,15 @@ private fun LoginScreen(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // Wide window: fire on the left, form on the right at a readable width.
         if (wide) Row(Modifier.fillMaxSize().imePadding()) {
-            LoginHero(Modifier.weight(1f).fillMaxHeight().systemBarsPadding().padding(16.dp), RoundedCornerShape(48.dp))
+            LoginHero(
+                Modifier.weight(1f).fillMaxHeight().systemBarsPadding().padding(16.dp),
+                RoundedCornerShape(48.dp)
+            )
             Column(
-                Modifier.weight(1f).verticalScroll(scroll).heightIn(min = this@BoxWithConstraints.maxHeight).safeDrawingPadding(),
-                verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
+                Modifier.weight(1f).verticalScroll(scroll)
+                    .heightIn(min = this@BoxWithConstraints.maxHeight).safeDrawingPadding(),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) { form(Modifier.widthIn(max = 480.dp).padding(32.dp)) }
         }
         // Phone: fits one screen, the hero takes whatever height the form leaves (at least 220 dp). Scrolls only when it can't.
@@ -641,7 +834,12 @@ private fun LoginScreen(
             val navBar = WindowInsets.navigationBars.getBottom(density)
             Layout(
                 listOf(
-                    { LoginHero(Modifier.onSizeChanged { heroHeight = it.height }, RoundedCornerShape(bottomStart = 48.dp, bottomEnd = 48.dp)) },
+                    {
+                        LoginHero(
+                            Modifier.onSizeChanged { heroHeight = it.height },
+                            RoundedCornerShape(bottomStart = 48.dp, bottomEnd = 48.dp)
+                        )
+                    },
                     { form(Modifier.widthIn(max = 560.dp).padding(24.dp)) },
                 ),
                 Modifier.fillMaxSize().imePadding().verticalScroll(scroll),
@@ -657,7 +855,8 @@ private fun LoginScreen(
         }
         // Once the hero has scrolled away, the form must not run under the status bar icons.
         if (!wide && !onDark) Box(
-            Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(MaterialTheme.colorScheme.surface),
+            Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars)
+                .background(MaterialTheme.colorScheme.surface),
         )
     }
 }
@@ -670,14 +869,26 @@ private fun LoginScreen(
 private fun LoginHero(modifier: Modifier, shape: Shape) {
     Box(
         modifier.clip(shape)
-            .background(Brush.verticalGradient(listOf(Color(0xFF1E0A04), Color(0xFF4A1400), Color(0xFF7A2500))))
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0xFF1E0A04),
+                        Color(0xFF4A1400),
+                        Color(0xFF7A2500)
+                    )
+                )
+            )
             .flames(true)
             .statusBarsPadding(),
         contentAlignment = Alignment.Center,
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(bottom = 24.dp)) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(bottom = 24.dp)
+        ) {
             Box(
-                Modifier.size(72.dp).springIn(0).background(Heat, MaterialShapes.Cookie9Sided.toShape()),
+                Modifier.size(72.dp).springIn(0)
+                    .background(Heat, MaterialShapes.Cookie9Sided.toShape()),
                 contentAlignment = Alignment.Center,
             ) { Icon(FlameIcon, null, Modifier.size(36.dp), tint = Color.White) }
             Spacer(Modifier.height(8.dp))
@@ -707,16 +918,39 @@ private fun LoginForm(
         Spacer(Modifier.height(16.dp))
         when (way) {
             null -> {
-                Button(onClick = { onWay(LoginWay.Controller) }, modifier = wide.springIn(3), shapes = ButtonDefaults.shapes()) {
-                    Text(stringResource(Res.string.pin_from_controller), style = MaterialTheme.typography.titleMedium)
+                Button(
+                    onClick = { onWay(LoginWay.Controller) },
+                    modifier = wide.springIn(3),
+                    shapes = ButtonDefaults.shapes()
+                ) {
+                    Text(
+                        stringResource(Res.string.pin_from_controller),
+                        style = MaterialTheme.typography.titleMedium
+                    )
                 }
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = { onWay(LoginWay.Manual) }, modifier = wide.springIn(4), shapes = ButtonDefaults.shapes()) {
-                    Text(stringResource(Res.string.pin_enter), style = MaterialTheme.typography.titleMedium)
+                OutlinedButton(
+                    onClick = { onWay(LoginWay.Manual) },
+                    modifier = wide.springIn(4),
+                    shapes = ButtonDefaults.shapes()
+                ) {
+                    Text(
+                        stringResource(Res.string.pin_enter),
+                        style = MaterialTheme.typography.titleMedium
+                    )
                 }
             }
+
             LoginWay.Manual -> {
-                LoginSteps(Res.string.pin_where, listOf(Res.string.pin_step1, Res.string.pin_step2, Res.string.pin_step3, Res.string.pin_step4))
+                LoginSteps(
+                    Res.string.pin_where,
+                    listOf(
+                        Res.string.pin_step1,
+                        Res.string.pin_step2,
+                        Res.string.pin_step3,
+                        Res.string.pin_step4
+                    )
+                )
                 Spacer(Modifier.height(24.dp))
                 OutlinedTextField(
                     pin, onPin,
@@ -724,7 +958,10 @@ private fun LoginForm(
                     singleLine = true,
                     isError = error != null,
                     supportingText = error?.let { { Text(it) } },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Done),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Ascii,
+                        imeAction = ImeAction.Done
+                    ),
                     keyboardActions = KeyboardActions(onDone = { if (pin.isNotEmpty() && !busy) onConnect() }),
                     shape = MaterialTheme.shapes.large,
                     modifier = Modifier.fillMaxWidth(),
@@ -732,27 +969,47 @@ private fun LoginForm(
                 Spacer(Modifier.height(16.dp))
                 ConnectButton(wide, pin.isNotEmpty(), busy, onConnect)
             }
+
             LoginWay.Controller -> {
-                LoginSteps(Res.string.ctrl_how, listOf(Res.string.ctrl_step1, Res.string.ctrl_step2, Res.string.ctrl_step3))
+                LoginSteps(
+                    Res.string.ctrl_how,
+                    listOf(Res.string.ctrl_step1, Res.string.ctrl_step2, Res.string.ctrl_step3)
+                )
                 Spacer(Modifier.height(24.dp))
                 if (controller == null) {
-                    error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
+                    error?.let {
+                        Text(
+                            it,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                     Spacer(Modifier.height(8.dp))
                     ConnectButton(wide, true, busy, { onFind(false) }, Res.string.ctrl_find)
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text(stringResource(Res.string.tab_controller), style = MaterialTheme.typography.labelLarge)
+                            Text(
+                                stringResource(Res.string.tab_controller),
+                                style = MaterialTheme.typography.labelLarge
+                            )
                             Text(
                                 controller.name ?: stringResource(Res.string.ctrl_on_hotspot),
                                 style = MaterialTheme.typography.titleMediumEmphasized,
                             )
                         }
-                        TextButton({ onFind(true) }, enabled = !busy) { Text(stringResource(Res.string.change)) }
+                        TextButton(
+                            { onFind(true) },
+                            enabled = !busy
+                        ) { Text(stringResource(Res.string.change)) }
                     }
                     Spacer(Modifier.height(12.dp))
                     PinField(
-                        dashboardPin, onDashboardPin, Modifier.fillMaxWidth(), error, label = stringResource(Res.string.dashboard_pin),
+                        dashboardPin,
+                        onDashboardPin,
+                        Modifier.fillMaxWidth(),
+                        error,
+                        label = stringResource(Res.string.dashboard_pin),
                         onDone = { if (pinComplete(dashboardPin) && !busy) onFromController() },
                     )
                     Spacer(Modifier.height(16.dp))
@@ -760,7 +1017,11 @@ private fun LoginForm(
                 }
             }
         }
-        if (way != null) TextButton({ onWay(null) }, Modifier.align(Alignment.CenterHorizontally), enabled = !busy) {
+        if (way != null) TextButton(
+            { onWay(null) },
+            Modifier.align(Alignment.CenterHorizontally),
+            enabled = !busy
+        ) {
             Text(stringResource(Res.string.back))
         }
     }
@@ -768,10 +1029,22 @@ private fun LoginForm(
 
 @Composable
 private fun ConnectButton(
-    modifier: Modifier, ready: Boolean, busy: Boolean, onClick: () -> Unit, label: StringResource = Res.string.connect,
+    modifier: Modifier,
+    ready: Boolean,
+    busy: Boolean,
+    onClick: () -> Unit,
+    label: StringResource = Res.string.connect,
 ) {
-    Button(onClick = onClick, modifier = modifier, enabled = ready && !busy, shapes = ButtonDefaults.shapes()) {
-        if (busy) LoadingIndicator(Modifier.size(32.dp), color = MaterialTheme.colorScheme.onPrimary)
+    Button(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = ready && !busy,
+        shapes = ButtonDefaults.shapes()
+    ) {
+        if (busy) LoadingIndicator(
+            Modifier.size(32.dp),
+            color = MaterialTheme.colorScheme.onPrimary
+        )
         else Text(stringResource(label), style = MaterialTheme.typography.titleMedium)
     }
 }
@@ -785,14 +1058,23 @@ private fun LoginSteps(title: StringResource, steps: List<StringResource>) {
     ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(stringResource(title), style = MaterialTheme.typography.titleMediumEmphasized)
-            val badges = listOf(MaterialShapes.Cookie4Sided, MaterialShapes.Pill, MaterialShapes.Sunny, MaterialShapes.Clover4Leaf)
+            val badges = listOf(
+                MaterialShapes.Cookie4Sided,
+                MaterialShapes.Pill,
+                MaterialShapes.Sunny,
+                MaterialShapes.Clover4Leaf
+            )
             steps.forEachIndexed { i, step ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         Modifier.size(32.dp).background(Heat, badges[i].toShape()),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("${i + 1}", style = MaterialTheme.typography.titleMediumEmphasized, color = Color.White)
+                        Text(
+                            "${i + 1}",
+                            style = MaterialTheme.typography.titleMediumEmphasized,
+                            color = Color.White
+                        )
                     }
                     Spacer(Modifier.width(14.dp))
                     Text(stringResource(step), style = MaterialTheme.typography.bodyMedium)
@@ -803,16 +1085,34 @@ private fun LoginSteps(title: StringResource, steps: List<StringResource>) {
 }
 
 @Composable
-private fun RoomCard(room: Room, boosted: Boolean, lastTarget: () -> Double, modifier: Modifier, onOpen: () -> Unit, onTarget: (Double?) -> Unit) {
+private fun RoomCard(
+    room: Room,
+    boosted: Boolean,
+    lastTarget: () -> Double,
+    modifier: Modifier,
+    onOpen: () -> Unit,
+    onTarget: (Double?) -> Unit
+) {
     val on = room.target != null
     val active = room.heating && on
     val scheme = MaterialTheme.colorScheme
-    val cold = isCold(room, remember { Settings() }) // read each recomposition, so a changed limit shows up
+    val cold = isCold(
+        room,
+        remember { Settings() }) // read each recomposition, so a changed limit shows up
     val asleep = !on && !cold
     val spec = MaterialTheme.motionScheme.defaultEffectsSpec<Color>()
     // Off and asleep: a night-sky card in any theme, like the fire's fixed orange. Heating shows as fire on top.
-    val container by animateColorAsState(if (asleep) NightSky else if (on) roomContainer(room.id) else scheme.surfaceContainerLow, spec)
-    val content by animateColorAsState(if (asleep) NightInk else contentColorFor(if (on) roomContainer(room.id) else scheme.surfaceContainerLow), spec)
+    val container by animateColorAsState(
+        if (asleep) NightSky else if (on) roomContainer(room.id) else scheme.surfaceContainerLow,
+        spec
+    )
+    val content by animateColorAsState(
+        if (asleep) NightInk else contentColorFor(
+            if (on) roomContainer(
+                room.id
+            ) else scheme.surfaceContainerLow
+        ), spec
+    )
     PressCard(
         onOpen, modifier.fillMaxWidth().shared("room-${room.id}"),
         colors = CardDefaults.cardColors(containerColor = container, contentColor = content),
@@ -830,7 +1130,12 @@ private fun RoomCard(room: Room, boosted: Boolean, lastTarget: () -> Double, mod
                     Text(room.name, style = MaterialTheme.typography.titleLargeEmphasized)
                     val status = listOfNotNull(
                         if (active) stringResource(Res.string.status_heating) else null,
-                        room.humidity?.let { stringResource(Res.string.humidity, "${it.toInt()}%") },
+                        room.humidity?.let {
+                            stringResource(
+                                Res.string.humidity,
+                                "${it.toInt()}%"
+                            )
+                        },
                         if (room.smart) stringResource(Res.string.smart) else null,
                         if (room.schedule) stringResource(Res.string.schedule) else null,
                         if (boosted) stringResource(Res.string.boost) else null,
@@ -844,9 +1149,21 @@ private fun RoomCard(room: Room, boosted: Boolean, lastTarget: () -> Double, mod
             }
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                RollingTemp(room.current, MaterialTheme.typography.displayMedium, Modifier.weight(1f))
-                if (on) TempStepper(room.target!!, onTarget, label = stringResource(Res.string.target))
-                else Text(stringResource(Res.string.off), style = MaterialTheme.typography.titleMedium, color = LocalContentColor.current.copy(alpha = 0.75f))
+                RollingTemp(
+                    room.current,
+                    MaterialTheme.typography.displayMedium,
+                    Modifier.weight(1f)
+                )
+                if (on) TempStepper(
+                    room.target!!,
+                    onTarget,
+                    label = stringResource(Res.string.target)
+                )
+                else Text(
+                    stringResource(Res.string.off),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = LocalContentColor.current.copy(alpha = 0.75f)
+                )
             }
         }
     }
@@ -863,11 +1180,22 @@ private fun QuickCard(
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
     ) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             TempStepper(t, onChange, buttonSize = 40.dp, label = title)
             Spacer(Modifier.weight(1f))
-            FilledTonalButton(onAction, enabled = !busy, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) {
-                if (busy) LoadingIndicator(Modifier.size(24.dp), color = LocalContentColor.current) else Text(action)
+            FilledTonalButton(
+                onAction,
+                enabled = !busy,
+                shapes = ButtonDefaults.shapes(),
+                colors = onCardTonal()
+            ) {
+                if (busy) LoadingIndicator(
+                    Modifier.size(24.dp),
+                    color = LocalContentColor.current
+                ) else Text(action)
             }
         }
     }
@@ -879,12 +1207,19 @@ private fun AwayOnCard(temp: Double, busy: Boolean, modifier: Modifier, onBack: 
         modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
     ) {
-        Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Column(Modifier.weight(1f)) {
-                Text(stringResource(Res.string.away_on_title), style = MaterialTheme.typography.titleMediumEmphasized)
+                Text(
+                    stringResource(Res.string.away_on_title),
+                    style = MaterialTheme.typography.titleMediumEmphasized
+                )
                 Text(
                     stringResource(Res.string.away_on_desc, fmt1(temp)),
-                    style = MaterialTheme.typography.bodySmall, color = LocalContentColor.current.copy(alpha = 0.8f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalContentColor.current.copy(alpha = 0.8f),
                 )
             }
             Spacer(Modifier.width(12.dp))
@@ -899,13 +1234,26 @@ private fun AwayOnCard(temp: Double, busy: Boolean, modifier: Modifier, onBack: 
 /** A failed load or empty state: icon in a cookie, the text, and Retry when there's something to retry. */
 @Composable
 internal fun Message(
-    text: String, modifier: Modifier = Modifier.fillMaxSize(), icon: ImageVector = CloudOffIcon, onRetry: (() -> Unit)?,
+    text: String,
+    modifier: Modifier = Modifier.fillMaxSize(),
+    icon: ImageVector = CloudOffIcon,
+    onRetry: (() -> Unit)?,
 ) {
     Column(modifier.padding(32.dp), Arrangement.Center, Alignment.CenterHorizontally) {
         Box(
-            Modifier.size(96.dp).background(MaterialTheme.colorScheme.secondaryContainer, MaterialShapes.Cookie9Sided.toShape()),
+            Modifier.size(96.dp).background(
+                MaterialTheme.colorScheme.secondaryContainer,
+                MaterialShapes.Cookie9Sided.toShape()
+            ),
             Alignment.Center,
-        ) { Icon(icon, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer) }
+        ) {
+            Icon(
+                icon,
+                null,
+                Modifier.size(40.dp),
+                tint = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+        }
         Spacer(Modifier.height(20.dp))
         Text(
             text, Modifier.widthIn(max = 360.dp), style = MaterialTheme.typography.titleMedium,
@@ -913,7 +1261,10 @@ internal fun Message(
         )
         if (onRetry != null) {
             Spacer(Modifier.height(20.dp))
-            Button(onRetry, shapes = ButtonDefaults.shapes()) { Text(stringResource(Res.string.retry)) }
+            Button(
+                onRetry,
+                shapes = ButtonDefaults.shapes()
+            ) { Text(stringResource(Res.string.retry)) }
         }
     }
 }
