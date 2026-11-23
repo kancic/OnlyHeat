@@ -38,7 +38,9 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.backhandler.BackHandler
+import androidx.navigationevent.NavigationEventInfo
+import androidx.navigationevent.compose.NavigationBackHandler
+import androidx.navigationevent.compose.rememberNavigationEventState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.Layout
@@ -385,7 +387,11 @@ private fun Main(
 
     // Back from another tab returns to Rooms before leaving the app. Lives here, not in MainTabs, because
     // MainTabs stays composed during a push transition and would steal the back press from NavDisplay.
-    BackHandler(tab != Tab.Rooms && backStack.size == 1) { tab = Tab.Rooms }
+    NavigationBackHandler(
+        rememberNavigationEventState(NavigationEventInfo.None),
+        isBackEnabled = tab != Tab.Rooms && backStack.size == 1,
+        onBackCompleted = { tab = Tab.Rooms }
+    )
 
     SharedTransitionLayout {
         CompositionLocalProvider(LocalSharedScope provides this) {
@@ -725,7 +731,11 @@ private fun LoginScreen(
     var dashboardPin by remember { mutableStateOf("") }
     var controller by remember { mutableStateOf<DashboardTarget?>(null) }
     var pendingDashboard by remember { mutableStateOf<VerifiedDashboard?>(null) }
-    BackHandler(way != null && !busy) { way = null; error = null }
+    NavigationBackHandler(
+        rememberNavigationEventState(NavigationEventInfo.None),
+        isBackEnabled = way != null && !busy,
+        onBackCompleted = { way = null; error = null }
+    )
     suspend fun login(submittedPin: String) {
         attempt { api.login(submittedPin) }
             .onSuccess { settings.saveLoginDashboard(submittedPin, pendingDashboard); onKey(it) }

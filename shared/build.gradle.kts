@@ -33,7 +33,7 @@ kotlin {
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.ui)
-            implementation(libs.compose.ui.backhandler)
+            implementation(libs.navigationevent.compose)
             api(libs.compose.material3) // ColorScheme is in App()'s signature
             implementation(libs.compose.resources)
             implementation(libs.ktor.client.core)

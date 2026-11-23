@@ -4,7 +4,11 @@ import ancic.karim.onlyheat.res.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.maxLengthTrim
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.foundation.text.input.then
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.verticalScroll
@@ -16,7 +20,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.russhwolf.settings.Settings
 import kotlinx.coroutines.CompletableDeferred
@@ -505,15 +508,24 @@ internal fun PinField(
     value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, error: String? = null, label: String? = null,
     onDone: (() -> Unit)? = null, // the keyboard's done key
 ) {
-    OutlinedTextField(
-        value, { v -> onChange(v.filter(Char::isDigit).take(PIN_LENGTH)) },
+    // ponytail: the secure field owns a TextFieldState; mirror it both ways so callers keep a plain String.
+    val state = rememberTextFieldState(value)
+    val latestValue by rememberUpdatedState(value)
+    val latestOnChange by rememberUpdatedState(onChange)
+    LaunchedEffect(value) { if (state.text.toString() != value) state.setTextAndPlaceCursorAtEnd(value) }
+    LaunchedEffect(state) {
+        snapshotFlow { state.text.toString() }.collect { if (it != latestValue) latestOnChange(it) }
+    }
+    OutlinedSecureTextField(
+        state,
         label = label?.let { { Text(it) } },
-        singleLine = true,
         isError = error != null,
         supportingText = error?.let { { Text(it) } },
-        visualTransformation = PasswordVisualTransformation(),
+        inputTransformation = InputTransformation.maxLengthTrim(PIN_LENGTH).then {
+            if (!asCharSequence().all(Char::isDigit)) revertAllChanges()
+        },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
-        keyboardActions = KeyboardActions(onDone = onDone?.let { f -> { f() } }),
+        onKeyboardAction = { default -> onDone?.invoke() ?: default() },
         shape = MaterialTheme.shapes.large,
         modifier = modifier,
     )
