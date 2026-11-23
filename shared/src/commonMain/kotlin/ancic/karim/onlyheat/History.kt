@@ -196,7 +196,7 @@ private fun BoostCard(boost: Boost?, onBoost: (Int) -> Unit, onStop: () -> Unit)
             // Tapping again while boosted restarts the timer from now.
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(30 to Res.string.boost_30, 60 to Res.string.boost_60, 120 to Res.string.boost_120).forEach { (min, label) ->
-                    FilledTonalButton({ onBoost(min) }, modifier = Modifier.weight(1f), shapes = ButtonDefaults.shapes()) { Text(stringResource(label)) }
+                    FilledTonalButton({ onBoost(min) }, modifier = Modifier.weight(1f), shapes = ButtonDefaults.shapes(), colors = onCardTonal()) { Text(stringResource(label)) }
                 }
             }
         }

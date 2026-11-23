@@ -94,6 +94,12 @@ fun OnlyHeatTheme(dynamicScheme: (@Composable (dark: Boolean) -> ColorScheme?)? 
     )
 }
 
+/** Tonal button tinted like the [TempStepper] − / + buttons, so it stays visible on every card color. */
+@Composable
+internal fun onCardTonal() = LocalContentColor.current.let {
+    ButtonDefaults.filledTonalButtonColors(containerColor = it.copy(alpha = 0.12f), contentColor = it)
+}
+
 /** − value + control with shape-morphing buttons and a rolling number. */
 @Composable
 internal fun TempStepper(

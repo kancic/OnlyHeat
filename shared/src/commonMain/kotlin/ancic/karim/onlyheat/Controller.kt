@@ -134,7 +134,8 @@ fun ControllerTab(
             }
 
             Section(stringResource(Res.string.restart_card_title), stringResource(Res.string.restart_card_desc), modifier = Modifier.springIn(3), container = MaterialTheme.colorScheme.primaryContainer) {
-                FilledTonalButton({ confirmRestart = true }, enabled = !restarting, shapes = ButtonDefaults.shapes()) {
+                FilledTonalButton({ confirmRestart = true }, enabled = !restarting, shapes = ButtonDefaults.shapes(),
+                    colors = onCardTonal()) {
                     Text(stringResource(Res.string.restart))
                 }
             }
@@ -456,6 +457,7 @@ private fun DiagnosticsCard(
                 // Unverified too: the restart asks which controller it is.
                 if (cloud == Link.Down && local in setOf(Link.Ok, Link.Unverified)) FilledTonalButton(
                     onRestart, enabled = !restarting && !running, shapes = ButtonDefaults.shapes(),
+                    colors = onCardTonal(),
                 ) { Text(stringResource(Res.string.restart)) }
             }
         },

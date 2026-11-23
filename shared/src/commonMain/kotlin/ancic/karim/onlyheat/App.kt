@@ -794,7 +794,7 @@ private fun QuickCard(title: String, t: Double, onChange: (Double) -> Unit, acti
         Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             TempStepper(t, onChange, buttonSize = 40.dp, label = title)
             Spacer(Modifier.weight(1f))
-            FilledTonalButton(onAction, shapes = ButtonDefaults.shapes()) { Text(action) }
+            FilledTonalButton(onAction, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) { Text(action) }
         }
     }
 }

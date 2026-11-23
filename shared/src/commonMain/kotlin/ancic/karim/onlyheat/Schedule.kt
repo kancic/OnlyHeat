@@ -224,7 +224,7 @@ private fun Choice(
 @Composable
 private fun TimeButton(label: StringResource, time: String, onPick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    FilledTonalButton({ open = true }, shapes = ButtonDefaults.shapes()) {
+    FilledTonalButton({ open = true }, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) {
         Text("${stringResource(label)} $time")
     }
     if (open) {
