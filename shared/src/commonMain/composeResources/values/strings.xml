@@ -29,7 +29,7 @@
     <string name="retry">Retry</string>
     <string name="status_heating">Heating</string>
     <string name="humidity">humidity %1$s</string>
-    <string name="smart">Smart</string>
+    <string name="smart">Thermal Intelligence</string>
     <string name="schedule">Schedule</string>
     <string name="target">target</string>
     <string name="off">Off</string>
@@ -40,13 +40,14 @@
     <string name="target_value">target %1$s°</string>
     <string name="last_24h">Last 24 hours</string>
     <string name="min_max">Min %1$s° · Max %2$s°</string>
-    <string name="smart_heating">Smart heating</string>
+    <string name="smart_heating">Thermal Intelligence</string>
     <string name="loading">Loading…</string>
     <string name="smart_on">On · %1$s°</string>
     <string name="smart_desc">Uses your target temperature and the AccuWeather forecast, with a ±2° margin, to balance comfort and economy.</string>
-    <string name="smart_target">Smart target</string>
-    <string name="smart_update">Update smart target</string>
-    <string name="smart_turn_on">Turn on smart heating</string>
+    <string name="smart_unsupported">This does not work on the controller’s current firmware (the AccuWeather forecast is unavailable before 1.0.9.2.0). Turn it off, or update the controller.</string>
+    <string name="smart_target">Target</string>
+    <string name="smart_update">Update target</string>
+    <string name="smart_turn_on">Turn on Thermal Intelligence</string>
     <string name="turn_off">Turn off</string>
     <string name="smart_rejected">The controller did not accept the change.</string>
     <string name="smart_rejected_schedule">The controller did not accept the change (this room follows its schedule).</string>
@@ -60,6 +61,7 @@
     <string name="range_month">30 days</string>
     <string name="stored_since">Saved on this device since %1$s, fills in over time</string>
     <string name="no_history">Not enough history saved yet. It builds up on this device from now on; the 24 h tab shows the last day.</string>
+    <string name="legend_predicted">Predicted</string>
     <string name="legend_below">Below target</string>
     <string name="no_data">No data yet</string>
     <string name="back">Back</string>
@@ -124,6 +126,9 @@
     <string name="controller_wifi_desc">Join the controller’s network in Wi-Fi settings, then tap Retry. If prompted about no internet, stay connected.</string>
     <string name="use_home_wifi">Use home Wi-Fi instead</string>
     <string name="lan_address_searching">Looking for controllers…</string>
+    <string name="firmware_version">Firmware %1$s</string>
+    <string name="firmware_changed_title">The controller updated itself</string>
+    <string name="firmware_changed_desc">Its firmware changed from %1$s to %2$s. If the schedule, restart or finding the controller stop working, update OnlyHeat.</string>
     <string name="lan_controller_title">Home Wi-Fi controller</string>
     <string name="lan_devices_title">Choose your controller</string>
     <string name="lan_match_wifi_name">Choose your controller by its Wi-Fi name.</string>

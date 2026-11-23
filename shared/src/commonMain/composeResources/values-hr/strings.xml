@@ -29,7 +29,7 @@
     <string name="retry">Pokušaj ponovno</string>
     <string name="status_heating">Grije</string>
     <string name="humidity">vlaga %1$s</string>
-    <string name="smart">Pametno</string>
+    <string name="smart">Thermal Intelligence</string>
     <string name="schedule">Raspored</string>
     <string name="target">cilj</string>
     <string name="off">Isključeno</string>
@@ -40,13 +40,14 @@
     <string name="target_value">cilj %1$s°</string>
     <string name="last_24h">Zadnja 24 sata</string>
     <string name="min_max">Min %1$s° · Maks %2$s°</string>
-    <string name="smart_heating">Pametno grijanje</string>
+    <string name="smart_heating">Thermal Intelligence</string>
     <string name="loading">Učitavanje…</string>
     <string name="smart_on">Uključeno · %1$s°</string>
     <string name="smart_desc">Koristi vašu ciljanu temperaturu i AccuWeather prognozu, uz odstupanje od ±2°, kako bi uskladilo udobnost i uštedu.</string>
-    <string name="smart_target">Pametni cilj</string>
-    <string name="smart_update">Ažuriraj pametni cilj</string>
-    <string name="smart_turn_on">Uključi pametno grijanje</string>
+    <string name="smart_unsupported">Ne radi na trenutačnom firmwareu regulatora (AccuWeather prognoza nije dostupna prije 1.0.9.2.0). Isključite je ili ažurirajte regulator.</string>
+    <string name="smart_target">Cilj</string>
+    <string name="smart_update">Ažuriraj cilj</string>
+    <string name="smart_turn_on">Uključi Thermal Intelligence</string>
     <string name="turn_off">Isključi</string>
     <string name="smart_rejected">Regulator nije prihvatio promjenu.</string>
     <string name="smart_rejected_schedule">Regulator nije prihvatio promjenu (ova soba prati raspored).</string>
@@ -60,6 +61,7 @@
     <string name="range_month">30 dana</string>
     <string name="stored_since">Spremljeno na ovom uređaju od %1$s, nadopunjuje se s vremenom</string>
     <string name="no_history">Još nema dovoljno spremljene povijesti. Skuplja se na ovom uređaju od sada; kartica 24 h prikazuje zadnji dan.</string>
+    <string name="legend_predicted">Predviđeno</string>
     <string name="legend_below">Ispod cilja</string>
     <string name="no_data">Još nema podataka</string>
     <string name="back">Natrag</string>
@@ -124,6 +126,9 @@
     <string name="controller_wifi_desc">U postavkama Wi-Fi mreže spojite se na mrežu regulatora, zatim dodirnite Pokušaj ponovno. Ako se pojavi upozorenje da nema interneta, ostanite povezani.</string>
     <string name="use_home_wifi">Koristi kućni Wi-Fi</string>
     <string name="lan_address_searching">Traženje regulatora…</string>
+    <string name="firmware_version">Firmver %1$s</string>
+    <string name="firmware_changed_title">Regulator se sam ažurirao</string>
+    <string name="firmware_changed_desc">Firmver se promijenio s %1$s na %2$s. Ako raspored, ponovno pokretanje ili pronalaženje regulatora prestanu raditi, ažurirajte OnlyHeat.</string>
     <string name="lan_controller_title">Regulator na kućnom Wi-Fiju</string>
     <string name="lan_devices_title">Odaberite regulator</string>
     <string name="lan_match_wifi_name">Odaberite regulator prema nazivu njegove Wi-Fi mreže.</string>

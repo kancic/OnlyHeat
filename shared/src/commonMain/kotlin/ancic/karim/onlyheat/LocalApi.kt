@@ -2,10 +2,12 @@ package ancic.karim.onlyheat
 
 import com.russhwolf.settings.Settings
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.DefaultRequest
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.cookies.HttpCookies
 import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
 import io.ktor.http.parameters
@@ -63,10 +65,14 @@ class LocalApi(
         return connection.httpClient {
             followRedirects = false
             install(HttpCookies) // PHP session + the "ttodevice" cookie
+            // Firmware 1.0.9.2.0 answers AJAX only with this header (what jQuery sends); older firmware ignores it.
+            install(DefaultRequest) { header("X-Requested-With", "XMLHttpRequest") }
             install(HttpTimeout) { requestTimeoutMillis = 10_000; connectTimeoutMillis = 4_000 }
             logHttp()
         }.use { http ->
-            reach(anyFailure = true) { http.login(target) } // a failed check() means it isn't the dashboard
+            val name = reach(anyFailure = true) { http.login(target) } // a failed check() means it isn't the dashboard
+            // Logged in, so the Wi-Fi name is readable on any firmware: keep it for the controller picker.
+            name?.let { device -> http.wifiName(target.host)?.let { settings.rememberWifiName(device, it) } }
             if (selected == null) {
                 lastTarget = target
                 settings.rememberLanTarget(target, host)
@@ -84,16 +90,21 @@ class LocalApi(
         throw e
     }
 
-    private suspend fun HttpClient.login(target: DashboardTarget) {
+    /** Returns the controller's name from its login page. */
+    private suspend fun HttpClient.login(target: DashboardTarget): String? {
         val base = "http://${target.host}"
         val page = get("$base/dashboard") // sets the device cookie the login expects
         check(page.status.isSuccess())
-        target.name?.let { check(dashboardName(page.bodyAsText()) == it) }
+        val html = page.bodyAsText()
+        val name = dashboardName(html)
+        target.name?.let { check(name == it) }
+        dashboardFirmware(html)?.let { settings.noteFirmware(it) }
         val response = submitForm("$base/include/ajax/login-check.php", parameters {
             pin.forEachIndexed { i, c -> append("loginInput${i + 1}", c.toString()) }
         })
         check(response.status.isSuccess())
         if (Json.parseToJsonElement(response.bodyAsText()).jsonObject.str("type") != "success") throw WrongDashboardPin()
+        return name
     }
 
     private suspend fun HttpClient.readSchedule(base: String) = parseSchedule(get("$base/scheduler").bodyAsText())
@@ -122,7 +133,9 @@ class LocalApi(
         })
         // A non-JSON answer (HTML error or login page) is a failed save too.
         val result = if (response.status.isSuccess()) attempt { Json.parseToJsonElement(response.bodyAsText()).jsonObject }.getOrNull() else null
-        if (result?.str("type") != "success") throw ApiException(result?.str("message") ?: "Save failed")
+        // Clearing the schedule is answered {"type":"warning","message":"No data sent, schedule disabled."}.
+        val cleared = entries.isEmpty() && result?.str("type") == "warning"
+        if (result?.str("type") != "success" && !cleared) throw ApiException(result?.str("message") ?: "Save failed")
         // Stored. A failed read-back must not report the save as failed.
         attempt { readSchedule(base) }.onFailure { log("schedule read-back failed", it) }.getOrNull()
     }

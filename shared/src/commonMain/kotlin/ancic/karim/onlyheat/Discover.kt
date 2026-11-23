@@ -36,7 +36,10 @@ internal fun dashboardProbeClient(connection: LanConnection? = null) = connectio
     install(HttpTimeout) { connectTimeoutMillis = 1_500 }
 }
 
-private val dashboardTitle = Regex("""<title>\s*Dashboard\s*\|\s*TermoTehnik PI\s*</title>""", RegexOption.IGNORE_CASE)
+// Firmware 1.0.9.2.0 renamed "TermoTehnik PI" to "ThermoTechnik ADVANCE".
+private val dashboardTitle = Regex(
+    """<title>\s*Dashboard\s*\|\s*(?:TermoTehnik PI|ThermoTechnik ADVANCE)\s*</title>""", RegexOption.IGNORE_CASE,
+)
 private val dashboardDevice = Regex("""<option\b[^>]*>\s*(TTO Advance-[0-9A-F]{6})\s*\(\*\)\s*</option>""", RegexOption.IGNORE_CASE)
 
 /** Recognizes the controller's login page. Its markup doesn't identify an individual unit. */
@@ -46,6 +49,30 @@ internal fun looksLikeDashboard(html: String): Boolean =
 
 internal fun dashboardName(html: String): String? =
     dashboardDevice.findAll(html).singleOrNull()?.groupValues?.get(1)
+
+// Under the login form: "TTO Advance 1.0.9.2.0<br>S/N: …" (the unit's name is "TTO Advance-XXXXXX", with a dash).
+private val dashboardFirmware = Regex("""TTO Advance (\d+(?:\.\d+)+)""")
+
+/** The controller's firmware version, shown on its login page without a PIN. */
+internal fun dashboardFirmware(html: String): String? = dashboardFirmware.find(html)?.groupValues?.get(1)
+
+internal const val FIRMWARE = "controllerFirmware"
+internal const val FIRMWARE_BEFORE = "controllerFirmwareBefore" // set when the version changed, until dismissed
+
+/** The controller installs updates by itself at night: remember the version and note when it changes. */
+internal fun Settings.noteFirmware(version: String) {
+    val old = getStringOrNull(FIRMWARE)
+    if (old != null && old != version) putString(FIRMWARE_BEFORE, old)
+    putString(FIRMWARE, version)
+}
+
+/** Thermal Intelligence (formerly "Smart Heating") needs AccuWeather, which only works since 1.0.9.2.0.
+ *  Unknown firmware counts as new: the controller auto-updates. */
+internal fun hasThermalIntelligence(firmware: String?): Boolean {
+    val v = firmware?.split('.')?.map { it.toIntOrNull() ?: 0 } ?: return true
+    val min = listOf(1, 0, 9, 2, 0)
+    return v.zip(min).firstOrNull { (a, b) -> a != b }?.let { (a, b) -> a > b } ?: (v.size >= min.size)
+}
 
 data class DashboardTarget(val host: String, val name: String? = null, val connectionId: String? = null)
 
@@ -65,6 +92,10 @@ internal fun savedLanTarget(value: String?): DashboardTarget? {
 
 internal fun Settings.savedLanTarget() = savedLanTarget(getStringOrNull(SAVED_LAN_TARGET))
 
+// Firmware 1.0.9.2.0 gives the Wi-Fi name only after login, so it is remembered per controller from the last login.
+internal fun Settings.knownWifiName(device: String?) = device?.let { getStringOrNull("wifiName.$it") }
+internal fun Settings.rememberWifiName(device: String, ssid: String) = putString("wifiName.$device", ssid)
+
 /** The hotspot needs no saving: it is always tried. */
 internal fun Settings.rememberLanTarget(target: DashboardTarget, hotspot: String) {
     if (target.host != hotspot) target.rememberedValue()?.let { putString(SAVED_LAN_TARGET, it) }
@@ -77,6 +108,8 @@ private suspend fun HttpClient.dashboardPage(host: String): String? {
             .let { if (it.status.isSuccess()) it.bodyAsText().takeIf(::looksLikeDashboard) else null }
     }.getOrNull()
 }
+
+internal suspend fun HttpClient.firmwareOf(host: String): String? = dashboardPage(host)?.let(::dashboardFirmware)
 
 internal suspend fun HttpClient.hasDashboard(host: String, expectedName: String? = null): Boolean =
     dashboardPage(host)?.let { expectedName == null || dashboardName(it) == expectedName } == true
@@ -98,8 +131,9 @@ internal suspend fun HttpClient.findNamedDashboards(exclude: String, found: (Das
     }
 }
 
-/** The controller's own Wi-Fi name (the user may have renamed it). The controller serves it without login. */
-private suspend fun HttpClient.wifiName(host: String): String? = attempt {
+/** The controller's own Wi-Fi name (the user may have renamed it). Before firmware 1.0.9.2.0 it was served without
+ *  login; newer firmware needs a logged-in session, which [LocalApi] uses to remember it ([knownWifiName]). */
+internal suspend fun HttpClient.wifiName(host: String): String? = attempt {
     val reply = post("http://$host/include/ajax/check-wifi-status.php") { timeout { requestTimeoutMillis = 3_000 } }
     Json.parseToJsonElement(reply.bodyAsText()).jsonObject.str("wifiSSID")
 }.getOrNull()

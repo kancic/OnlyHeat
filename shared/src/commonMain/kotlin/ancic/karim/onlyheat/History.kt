@@ -1,6 +1,7 @@
 package ancic.karim.onlyheat
 
 import ancic.karim.onlyheat.res.*
+import com.russhwolf.settings.Settings
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.pluralStringResource
@@ -23,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -163,7 +165,9 @@ fun RoomScreen(
             }
 
             BoostCard(boost, onBoost, onStopBoost)
-            SmartCard(api, key, room, smart, smartError) { smart = it }
+            val supported = remember { hasThermalIntelligence(Settings().getStringOrNull(FIRMWARE)) }
+            // Old firmware: only show it while it's on, so it can be turned off.
+            if (supported || smart?.on == true) SmartCard(api, key, room, smart, smartError, supported) { smart = it }
           }
     }
 }
@@ -200,7 +204,7 @@ private fun BoostCard(boost: Boost?, onBoost: (Int) -> Unit, onStop: () -> Unit)
 }
 
 @Composable
-private fun SmartCard(api: HeatApi, key: String, room: Room, smart: Smart?, loadError: String?, onSmart: (Smart) -> Unit) {
+private fun SmartCard(api: HeatApi, key: String, room: Room, smart: Smart?, loadError: String?, supported: Boolean, onSmart: (Smart) -> Unit) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
@@ -246,10 +250,10 @@ private fun SmartCard(api: HeatApi, key: String, room: Room, smart: Smart?, load
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                stringResource(Res.string.smart_desc),
+                stringResource(if (supported) Res.string.smart_desc else Res.string.smart_unsupported),
                 style = MaterialTheme.typography.bodySmall,
             )
-            if (smart != null) {
+            if (smart != null && supported) {
                 Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(Res.string.smart_target), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
@@ -312,7 +316,9 @@ fun OverviewScreen(
             r to if (period == Period.Day) days?.find { it.roomId == r.id }?.points.orEmpty().takeIf { days != null }
             else stored?.get(r.id)
         }
-        val shared = yRangeOf(rows.flatMap { it.second.orEmpty() }) // one scale so rooms compare at a glance
+        val forecasts = if (period == Period.Day) days.orEmpty().associate { it.roomId to it.forecast } else emptyMap()
+        // One scale so rooms compare at a glance.
+        val shared = yRangeOf(rows.flatMap { it.second.orEmpty() } + forecasts.values.flatten())
         // Under 2 days saved, the week/month view would only repeat the 24 h tab: say so instead.
         val nothingSaved = period != Period.Day && stored != null && nowSeconds() - (since ?: nowSeconds()) < 2 * 24 * 3600L
         BoxWithConstraints(Modifier.padding(pad).fillMaxSize()) { LazyVerticalGrid(
@@ -332,7 +338,7 @@ fun OverviewScreen(
                             ) { Text(stringResource(p.label)) }
                         }
                     }
-                    if (!dayFailed && !nothingSaved) Legend()
+                    if (!dayFailed && !nothingSaved) Legend(predicted = forecasts.values.any { it.isNotEmpty() })
                     if (period != Period.Day && !nothingSaved) since?.let {
                         Text(
                             stringResource(Res.string.stored_since, dayMonth(it)),
@@ -368,7 +374,7 @@ fun OverviewScreen(
                                 "${fmt1(temps.min())}–${fmt1(temps.max())}°", style = MaterialTheme.typography.bodySmall,
                             )
                             Spacer(Modifier.height(8.dp))
-                            TempChart(points, Modifier.fillMaxWidth().height(140.dp), shared)
+                            TempChart(points, Modifier.fillMaxWidth().height(140.dp), shared, forecast = forecasts[room.id].orEmpty())
                         }
                     }
                 }
@@ -428,25 +434,30 @@ private fun StatsLine(points: List<Point>, style: TextStyle) {
 }
 
 @Composable
-private fun Legend() {
+private fun Legend(predicted: Boolean = false) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         LegendItem(Heat, stringResource(Res.string.legend_room))
         LegendItem(muted, stringResource(Res.string.legend_target))
+        if (predicted) LegendItem(Heat, stringResource(Res.string.legend_predicted), dashed = true)
         LegendItem(Heat.copy(alpha = BelowAlpha), stringResource(Res.string.legend_below), height = 10.dp)
     }
 }
 
 @Composable
-private fun LegendItem(color: Color, label: String, height: androidx.compose.ui.unit.Dp = 3.dp) {
+private fun LegendItem(color: Color, label: String, height: androidx.compose.ui.unit.Dp = 3.dp, dashed: Boolean = false) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Canvas(Modifier.size(14.dp, height)) { drawRect(color) }
+        Canvas(Modifier.size(14.dp, height)) {
+            if (dashed) drawLine(color, Offset(0f, center.y), Offset(size.width, center.y), size.height, pathEffect = Dashes)
+            else drawRect(color)
+        }
         Spacer(Modifier.width(4.dp))
         Text(label, style = MaterialTheme.typography.labelSmall)
     }
 }
 
 private const val BelowAlpha = 0.25f
+private val Dashes by lazy { PathEffect.dashPathEffect(floatArrayOf(8f, 6f)) } // lazy: unit tests have no Skia
 
 /** Padded y range over all points, at least 4° tall so half a degree of sensor noise stays flat. */
 internal fun yRangeOf(points: List<Point>): ClosedFloatingPointRange<Double>? {
@@ -460,16 +471,18 @@ internal fun yRangeOf(points: List<Point>): ClosedFloatingPointRange<Double>? {
 
 /**
  * Room temperature (orange) and target (grey) over time; time below target is shaded, holes in the data stay empty.
- * Pass [yRange] to share one scale across several charts.
+ * Pass [yRange] to share one scale across several charts. A [forecast] continues both lines dashed after the last reading.
  */
 @OptIn(ExperimentalTime::class)
 @Composable
 fun TempChart(
     points: List<Point>, modifier: Modifier, yRange: ClosedFloatingPointRange<Double>? = null,
     interactive: Boolean = false, // press or drag to read a value; off where the chart sits on a tappable card
+    forecast: List<Point> = emptyList(),
 ) {
     val pts = remember(points) { points.filter { it.time > 0 } } // the History tab recomposes on every poll
-    val range = yRange ?: yRangeOf(pts)
+    val ahead = remember(pts, forecast) { pts.lastOrNull()?.let { last -> listOf(last) + forecast.filter { it.time > last.time } }.orEmpty() }
+    val range = yRange ?: yRangeOf(pts + ahead)
     if (pts.size < 2 || range == null) { Box(modifier, Alignment.Center) { Text(stringResource(Res.string.no_data)) }; return }
 
     val measurer = rememberTextMeasurer()
@@ -480,7 +493,7 @@ fun TempChart(
     val yMin = range.start
     val yMax = range.endInclusive
     val t0 = pts.first().time // a young history fills the width; the header says how far back it goes
-    val t1 = pts.last().time
+    val t1 = ahead.last().time
     val pairs = remember(pts) { val gap = maxStep(pts); pts.zipWithNext().filter { (a, b) -> b.time - a.time <= gap } }
     val surface = MaterialTheme.colorScheme.inverseSurface
     val onSurface = MaterialTheme.colorScheme.inverseOnSurface
@@ -538,6 +551,9 @@ fun TempChart(
 
         series(pairs, { it.target }, muted, ::x, ::y)
         series(pairs, { it.current }, Heat, ::x, ::y)
+        val next = ahead.zipWithNext()
+        series(next, { it.target }, muted, ::x, ::y, Dashes)
+        series(next, { it.current }, Heat, ::x, ::y, Dashes)
 
         // Crosshair on the reading nearest the finger.
         touchX?.let { tx ->
@@ -560,14 +576,14 @@ fun TempChart(
 
 private fun DrawScope.series(
     pairs: List<Pair<Point, Point>>, value: (Point) -> Double?, color: Color,
-    x: (Long) -> Float, y: (Double) -> Float,
+    x: (Long) -> Float, y: (Double) -> Float, effect: PathEffect? = null,
 ) {
     pairs.forEach { (a, b) ->
         val va = value(a) ?: return@forEach
         val vb = value(b) ?: return@forEach
         drawLine(
             color, Offset(x(a.time), y(va)), Offset(x(b.time), y(vb)),
-            strokeWidth = 2.dp.toPx(),
+            strokeWidth = 2.dp.toPx(), pathEffect = effect,
         )
     }
 }

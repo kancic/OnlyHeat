@@ -22,6 +22,25 @@ class DiscoverTest {
         assertFalse(looksLikeDashboard(title))
         assertFalse(looksLikeDashboard(title + login.replace("loginInput4", "unrelated")))
         assertTrue(looksLikeDashboard(title + login))
+        assertTrue(looksLikeDashboard("<title>Dashboard | ThermoTechnik ADVANCE</title>$login")) // firmware 1.0.9.2.0
+    }
+
+    @Test fun readsTheFirmwareVersionNotTheUnitName() {
+        val unit = """<option value="127.0.1.1" >TTO Advance-A1B2C3
+ (*)</option>"""
+        assertEquals("1.0.9.2.0", dashboardFirmware("$unit<p class=\"mt-3 text-center\">TTO Advance 1.0.9.2.0<br>S/N: TTO-1</p>"))
+        assertEquals("1.0.7.0.8", dashboardFirmware("$unit<p><br>TTO Advance 1.0.7.0.8<br>S/N: TTO-1</p>"))
+        assertNull(dashboardFirmware(unit))
+    }
+
+    @Test fun thermalIntelligenceOnlyFrom1092() {
+        assertTrue(hasThermalIntelligence(null))
+        assertTrue(hasThermalIntelligence("1.0.9.2.0"))
+        assertTrue(hasThermalIntelligence("1.0.10.0.0"))
+        assertTrue(hasThermalIntelligence("1.1"))
+        assertFalse(hasThermalIntelligence("1.0.7.0.8"))
+        assertFalse(hasThermalIntelligence("1.0.9.1.9"))
+        assertFalse(hasThermalIntelligence("1.0.9"))
     }
 
     @Test fun showsTheLocalUnitNameRatherThanAnotherDeviceInTheDashboard() {

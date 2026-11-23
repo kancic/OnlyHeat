@@ -44,6 +44,9 @@ fun ControllerTab(
     var savedController by remember { mutableStateOf(settings.savedLanTarget()?.name) }
     var choosing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    var firmwareSeen by remember { mutableIntStateOf(0) } // bumped after anything that may have read the version
+    val firmware = remember(firmwareSeen) { settings.getStringOrNull(FIRMWARE) }
+    val firmwareBefore = remember(firmwareSeen) { settings.getStringOrNull(FIRMWARE_BEFORE) }
 
     /** Saves the picked controller once its page shows the picked name. null: the user cancelled. */
     suspend fun chooseController(): Boolean? = attempt { controllerPicker.find(host, change = true) }
@@ -106,7 +109,20 @@ fun ControllerTab(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            DiagnosticsCard(Modifier.springIn(0), host, settings, ::chooseController, requestLocalNetwork, cloudStatus, restarting) {
+            if (firmwareBefore != null && firmware != null) Section(
+                stringResource(Res.string.firmware_changed_title),
+                stringResource(Res.string.firmware_changed_desc, firmwareBefore, firmware),
+                modifier = Modifier.springIn(0), container = MaterialTheme.colorScheme.errorContainer,
+            ) {
+                TextButton({ settings.remove(FIRMWARE_BEFORE); firmwareSeen++ }, shapes = ButtonDefaults.shapes()) {
+                    Text(stringResource(Res.string.ok))
+                }
+            }
+
+            DiagnosticsCard(
+                Modifier.springIn(0), host, settings, ::chooseController, requestLocalNetwork, cloudStatus, restarting,
+                onChecked = { firmwareSeen++ },
+            ) {
                 confirmRestart = true
             }
 
@@ -135,7 +151,10 @@ fun ControllerTab(
 
             Section(
                 stringResource(Res.string.lan_controller_title),
-                savedController ?: stringResource(Res.string.pin_not_set),
+                listOfNotNull(
+                    savedController ?: stringResource(Res.string.pin_not_set),
+                    firmware?.let { stringResource(Res.string.firmware_version, it) },
+                ).joinToString("\n"),
                 modifier = Modifier.springIn(5),
             ) {
                 TextButton({
@@ -235,7 +254,7 @@ internal class LanControllerPicker(private val settings: Settings) {
             val connection = currentLanConnection()
             dashboardProbeClient(connection).use { client ->
                 client.findNamedDashboards(hotspot) { found, wifi ->
-                    if (wifi != null) wifiNames += found.host to wifi
+                    (wifi ?: settings.knownWifiName(found.name))?.let { wifiNames += found.host to it }
                     discovered = (discovered + found.copy(connectionId = connection?.id)).sortedBy { t -> t.name }
                 }
             }
@@ -363,7 +382,7 @@ private enum class Link { Unknown, Ok, Unverified, Down, NoInternet }
 private fun DiagnosticsCard(
     modifier: Modifier, host: String, settings: Settings, chooseController: suspend () -> Boolean?,
     requestLocalNetwork: suspend () -> Boolean, cloudStatus: suspend () -> Throwable?,
-    restarting: Boolean, onRestart: () -> Unit,
+    restarting: Boolean, onChecked: () -> Unit, onRestart: () -> Unit,
 ) {
     var cloud by remember { mutableStateOf(Link.Unknown) }
     var local by remember { mutableStateOf(Link.Unknown) }
@@ -385,7 +404,9 @@ private fun DiagnosticsCard(
                 launch {
                     local = when {
                         !requestLocalNetwork() -> Link.Down
-                        resolveDashboard(host, settings) != null -> Link.Ok
+                        resolveDashboard(host, settings)?.also { (target, connection) ->
+                            dashboardProbeClient(connection).use { it.firmwareOf(target.host) }?.let { settings.noteFirmware(it) }
+                        } != null -> Link.Ok
                         dashboardProbeClient().use { it.findLanDashboard(host) } != null -> Link.Unverified
                         else -> Link.Down
                     }
@@ -393,6 +414,7 @@ private fun DiagnosticsCard(
             }
             log("diagnostics: cloud=$cloud local=$local ($host)")
             running = false
+            onChecked()
         }
     }
 

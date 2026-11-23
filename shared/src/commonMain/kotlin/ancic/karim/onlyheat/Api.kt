@@ -116,6 +116,7 @@ data class Point(val time: Long, val current: Double?, val target: Double?)
 data class DaySummary(
     val roomId: String, val name: String,
     val points: List<Point>,
+    val forecast: List<Point> = emptyList(), // the controller's hourly prediction for the next hours
 )
 
 data class Smart(val on: Boolean, val target: Double?)
@@ -129,8 +130,11 @@ internal fun parsePoint(o: JsonObject) = Point(
 internal fun parseDay(o: JsonObject) = DaySummary(
     roomId = o.str("roomID") ?: "",
     name = o.str("roomName") ?: "Room",
-    // The rest-of-today prediction (predictedCurrentTemp/predictedTargetTemp) is dropped: it was always a flat line.
     points = o.objects("logs").filter { it["predictedCurrentTemp"] == null }.map(::parsePoint),
+    // Flat on firmware 1.0.7.0.8; a real prediction since 1.0.9.2.0 (AccuWeather works again).
+    forecast = o.objects("logs").filter { it["predictedCurrentTemp"] != null }.map {
+        Point(it.num("dateTime")?.toLong() ?: 0, it.num("predictedCurrentTemp"), it.num("predictedTargetTemp"))
+    },
 )
 
 private fun JsonObject.objects(k: String) = (this[k] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }

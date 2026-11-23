@@ -23,10 +23,11 @@ class ApiTest {
         assertEquals("-0.5", fmt1(-0.5)); assertEquals("24.7", fmt1(24.687))
     }
 
-    @Test fun dayKeepsHistoryAndDropsPrediction() {
+    @Test fun daySeparatesHistoryFromPrediction() {
         val d = parseDay(Json.parseToJsonElement("""{"roomID":"3","roomName":"Spavaca soba","logs":[
             {"dateTime":1795176000,"currentTemp":"23.875","targetTemp":"23"},
             {"dateTime":1795266000,"predictedCurrentTemp":"23.412","predictedTargetTemp":"20.2"}]}""").jsonObject)
         assertEquals(listOf(Point(1795176000, 23.875, 23.0)), d.points)
+        assertEquals(listOf(Point(1795266000, 23.412, 20.2)), d.forecast)
     }
 }
