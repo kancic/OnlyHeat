@@ -53,6 +53,7 @@
     <string name="smart_rejected_schedule">Regulator nije prihvatio promjenu (ova soba prati raspored).</string>
     <string name="legend_room">Soba</string>
     <string name="legend_target">Cilj</string>
+    <string name="legend_outside">Vani</string>
     <string name="below_for">Ispod cilja %1$s</string>
     <string name="never_below">Nikad ispod cilja</string>
     <string name="reached_in">Do cilja za %1$s</string>

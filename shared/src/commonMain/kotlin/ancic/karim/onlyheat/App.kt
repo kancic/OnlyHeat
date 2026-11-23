@@ -137,10 +137,9 @@ fun App(
                 api,
                 requestLocalNetwork,
                 statusBarOnDark
-            ) { settings.putString("authKey", it); key = it }
+            ) { pairing -> savePairing(settings, pairing); key = pairing.key }
             else Main(api, k, requestLocalNetwork, notify, wakeAt, backgroundAlerts) {
-                settings.remove("authKey")
-                key = null
+                if (clearSession(settings, k)) key = null
             }
         }
     }
@@ -176,7 +175,7 @@ internal class HomeModel(
     var allTarget by mutableStateOf(settings.getDouble("allTarget", 21.0)) // "All rooms" stepper
     var error by mutableStateOf<String?>(null)
     var refreshing by mutableStateOf(false)
-    var weather by mutableStateOf<Weather?>(null) // dashboard's AccuWeather, when the cloud has no TS7 value
+    var weather by mutableStateOf<Weather?>(null) // AccuWeather from the cloud; a TS7 reading wins for the temperature
     private var weatherAt = 0L
     val days = mutableStateOf<List<DaySummary>?>(null) // History tab, kept across navigation
     private val pending = mutableMapOf<String, Job>() // debounced writes per room id
@@ -185,6 +184,7 @@ internal class HomeModel(
     suspend fun load() {
         attempt { api.home(key) } // a cancel means polling paused, not an error
             .onSuccess { fresh ->
+                if (savedAuthKey(settings) != key) return
                 // Don't let a poll overwrite a value the user is still adjusting.
                 val local = home?.rooms?.associateBy { it.id }.orEmpty()
                 home = fresh.copy(rooms = fresh.rooms.map { r ->
@@ -214,16 +214,14 @@ internal class HomeModel(
         if (ticks++ > 0) attempt { syncHistory(api, history, key, settings) } // next tick tries again
     }
 
-    // ponytail: one dashboard login per 15 min (or on pull to refresh), only with a saved PIN.
-    // Unreachable controller (off the home network) hides the weather instead of showing a stale one.
+    // ponytail: AccuWeather refreshes about hourly; one slow (~3 s) cloud call per 15 min or pull to refresh.
+    // A failed call keeps the last value: it is at most 15 minutes older than it would have been.
     private suspend fun loadWeather(force: Boolean) {
-        val h = home ?: return
-        if (h.outdoorTemp != null || (!force && nowSeconds() - weatherAt <= 15 * 60)) return
-        val pin = savedPin(settings) ?: return
+        if (!force && nowSeconds() - weatherAt <= 15 * 60) return
         weatherAt = nowSeconds()
-        attempt { LocalApi(h.ip ?: HOTSPOT, pin, settings) { null }.weather() }
+        attempt { api.weather(key) }
             .onSuccess { weather = it }
-            .onFailure { weather = null; log("dashboard weather failed", it) }
+            .onFailure { log("weather failed", it) }
     }
 
     /** Lowers every room that is on to [awayTemp] and remembers what each one had. */
@@ -254,7 +252,8 @@ internal class HomeModel(
                     )
                 }
             } // else the error below covers it
-            saveAway(settings, null); load(); awayBusy = false
+            if (savedAuthKey(settings) == key) saveAway(settings, null)
+            load(); awayBusy = false
             snackbar.showSnackbar(errorText(e)); return@launch
         }
         delay(4000) // read back, like single rooms
@@ -281,7 +280,7 @@ internal class HomeModel(
             load(); awayBusy = false
             snackbar.showSnackbar(errorText(e)); return@launch // still away, so it can be retried
         }
-        saveAway(settings, null)
+        if (savedAuthKey(settings) == key) saveAway(settings, null)
         delay(4000) // read back, like goAway
         load()
         away = false; awayBusy = false
@@ -368,7 +367,6 @@ private fun Main(
     onLogout: () -> Unit,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val settings = koinInject<Settings>()
     val model = koinViewModel<HomeModel>(key = "home:$key") { parametersOf(key) }
     model.visible = { lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
     model.notify = notify
@@ -420,7 +418,7 @@ private fun Main(
                                 host,
                                 requestLocalNetwork,
                                 backgroundAlerts,
-                                { clearAccountState(settings); onLogout() }) {
+                                onLogout) {
                                 backStack += it
                             }
                         }
@@ -723,7 +721,7 @@ private fun LoginScreen(
     api: HeatApi,
     requestLocalNetwork: suspend () -> Boolean,
     statusBarOnDark: (Boolean) -> Unit,
-    onKey: (String) -> Unit,
+    onKey: (Pairing) -> Unit,
 ) {
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }

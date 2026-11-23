@@ -5,9 +5,31 @@ import java.util.UUID
 import java.util.prefs.Preferences
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class LoginDashboardTest {
+    @Test fun logoutClearsOnlyTheCurrentSessionsControllerState() {
+        val node = Preferences.userRoot().node("onlyheat-test-${UUID.randomUUID()}")
+        try {
+            val settings = PreferencesSettings(node)
+            savePairing(settings, Pairing("current", "controller"))
+            settings.putDouble("allTarget", 24.0)
+            settings.putDouble("lastTarget.1", 23.0)
+            saveAway(settings, mapOf("1" to 23.0))
+            putBoost(settings, Boost("1", 1L, 24.0, 22.0))
+            settings.putString("theme", "dark")
+
+            assertFalse(clearSession(settings, "old"))
+            assertEquals(mapOf("1" to 23.0), awaySaved(settings))
+            assertTrue(clearSession(settings, "current"))
+            assertEquals(setOf("theme"), settings.keys)
+        } finally {
+            node.removeNode()
+        }
+    }
+
     @Test fun localCredentialsAreSavedOnlyForTheAcceptedApiPin() {
         val node = Preferences.userRoot().node("onlyheat-test-${UUID.randomUUID()}")
         try {

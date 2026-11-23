@@ -25,4 +25,20 @@ class HistoryTest {
         val pts = listOf(p(0, 20.0, 23.0), p(5, 20.0, 23.0), p(10, 20.0, 23.0), p(2890, 23.0, 23.0), p(2895, 23.0, 23.0))
         assertEquals(10 * 60L, chartStats(pts).belowSeconds)
     }
+
+    @Test fun axisBreaksOnlyWhenOutsideIsFarFromTheRoom() {
+        val room = 22.0..25.0
+        assertEquals(listOf(room), axisBands(room, null))
+        assertEquals(listOf(room, -2.0..8.0), axisBands(room, -2.0..8.0)) // winter: outside below, gap cut out
+        assertEquals(listOf(17.0..25.0), axisBands(room, 17.0..20.0)) // closer than 3°: one continuous axis
+        assertEquals(listOf(28.0..34.0, room), axisBands(room, 28.0..34.0)) // hot day: outside above
+    }
+
+    @Test fun forecastStartsOnItsOwnOrContinuesFromOneReading() {
+        val last = p(0, 8.0, null)
+        val forecast = listOf(p(60, 7.0, null), p(120, 6.0, null))
+        assertEquals(forecast, forecastLine(emptyList(), forecast))
+        assertEquals(listOf(last) + forecast, forecastLine(listOf(last), listOf(last) + forecast))
+        assertEquals(emptyList(), forecastLine(listOf(last), listOf(last)))
+    }
 }

@@ -60,9 +60,8 @@ comes from `Api.kt` and the dashboard doc.
 | Unknown endpoint, or GET | `Invalid API parameter` |
 | Endpoint switched off server-side | `command disabled` |
 
-**OnlyHeat impact (not fixed):** `AuthExpired` triggers only on `Invalid authentication key`. A revoked key
-returns `No device found for requested authentication key` instead. OnlyHeat then shows that text as an ordinary
-error and doesn't send the user back to login.
+**OnlyHeat impact (fixed):** `AuthExpired` used to trigger only on `Invalid authentication key`, so a revoked key
+showed an ordinary error. Both texts now log the user out (`apiError()` in `Api.kt`).
 
 ## 3. Endpoints
 
@@ -79,7 +78,7 @@ capture. The three writes and `getKey` were only read from the app code.
 | `getSmartRoomLogsLast24h` | – | ✓ | `last24h()` |
 | `getRoomSmart` | `roomID` | ✓ | `smart()` |
 | `setRoomSmart` | `roomID`, `isSmart` (`1`/`0`), `smartTarget` (only sent when `isSmart=1`) | – | `setSmart()` |
-| `getSmartForecast` | – | ✓ | not used |
+| `getSmartForecast` | – | ✓ | `weather()` |
 | `getDashboardForecast` | – | ✓ (disabled) | not used |
 | `getTempSensors` | – | ✓ | not used |
 | `getTSensorTemp` | `tempSensorID` | ✓ | not used |
@@ -132,8 +131,10 @@ since this unit has no TS7. On 1.0.7.0.8 they were 0 and the prediction was flat
 The stat fields are the same 12 tiles as the dashboard's `/weather` page. `outsideTemp` and `predictedOutsideTemp` are
 the same for every room.
 
-**OnlyHeat impact:** `parseDay()` splits readings from predictions by `predictedCurrentTemp`, but it ignores
-`outsideTemp`, `predictedOutsideTemp` and the stats.
+**OnlyHeat impact:** `parseDay()` reads `outsideTemp` and `predictedOutsideTemp` into `Point.outside`. All-zero
+outside values (1.0.7.0.8) are treated as no data. History draws them in every room chart as a thin blue line on the same scale, with the empty degrees between outside and the room cut out (a broken axis), and
+`syncHistory()` saves them as readings of the pseudo-room `outside`, so the 7 and 30 day views fill in from then
+on. The stat fields are not used.
 
 ### 3.4 `getRoomSmart` / `setRoomSmart`
 
@@ -167,8 +168,8 @@ The AccuWeather data the dashboard shows, available from anywhere:
 - `image` is an AccuWeather icon URL without an extension, over plain HTTP. The number is AccuWeather's icon code.
 - Before firmware 1.0.9.2.0 AccuWeather didn't work on this unit, so this was empty or zero.
 
-**OnlyHeat impact:** OnlyHeat scrapes the same "Current Conditions" from the local `/dashboard`
-(`LocalApi.weather()`), which only works on the home network. This endpoint would work from anywhere.
+**OnlyHeat impact:** the Rooms tab's weather pill uses this (`HeatApi.weather()`), replacing the local `/dashboard`
+scraping that only worked on the home network.
 
 ### 3.6 `getDashboardForecast`
 

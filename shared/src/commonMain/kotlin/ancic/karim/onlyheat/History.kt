@@ -304,17 +304,19 @@ fun OverviewScreen(
     var attempt by remember { mutableIntStateOf(0) }
     var period by rememberSaveable { mutableStateOf(Period.Day) }
     var stored by remember { mutableStateOf<Map<String, List<Point>>?>(null) } // per room, for week/month
+    var storedOutside by remember { mutableStateOf<List<Point>>(emptyList()) }
     var since by remember { mutableStateOf<Long?>(null) }
     LaunchedEffect(attempt) {
         error = null
         attempt { days = api.last24h(key) }.onFailure { error = errorText(it) }
     }
     val ids = rooms?.map { it.id } // stable across polls, unlike the list itself
-    LaunchedEffect(period, ids) {
+    LaunchedEffect(period, ids, key) {
         if (ids == null || period == Period.Day) return@LaunchedEffect
         suspend fun read() {
             val from = nowSeconds() - period.seconds
             stored = ids.associateWith { id -> history.averaged(id, from, period.bucket).map { it.point() } }
+            storedOutside = history.averaged(outsideId(key, settings), from, period.bucket).map { it.point() }
             since = history.oldest()
         }
         read() // what we have, right away
@@ -329,6 +331,9 @@ fun OverviewScreen(
             else stored?.get(r.id)
         }
         val forecasts = if (period == Period.Day) days.orEmpty().associate { it.roomId to it.forecast } else emptyMap()
+        val outside = if (period == Period.Day) days.orEmpty().flatMap { it.points }.outside() else storedOutside
+        val outsideAhead = if (period == Period.Day) days.orEmpty().flatMap { it.forecast }.outside() else emptyList()
+        val hasOutside = outside.isNotEmpty() || outsideAhead.isNotEmpty()
         // One scale so rooms compare at a glance.
         val shared = yRangeOf(rows.flatMap { it.second.orEmpty() } + forecasts.values.flatten())
         // Under 2 days saved, the week/month view would only repeat the 24 h tab: say so instead.
@@ -350,7 +355,10 @@ fun OverviewScreen(
                             ) { Text(stringResource(p.label)) }
                         }
                     }
-                    if (!dayFailed && !nothingSaved) Legend(predicted = forecasts.values.any { it.isNotEmpty() })
+                    if (!dayFailed && !nothingSaved) Legend(
+                        predicted = outsideAhead.isNotEmpty() || forecasts.values.any { it.isNotEmpty() },
+                        outside = hasOutside,
+                    )
                     if (period != Period.Day && !nothingSaved) since?.let {
                         Text(
                             stringResource(Res.string.stored_since, dayMonth(it)),
@@ -371,7 +379,7 @@ fun OverviewScreen(
                     Column(Modifier.padding(20.dp)) {
                         Text(room.name, style = MaterialTheme.typography.titleMediumEmphasized)
                         if (points == null) Box(Modifier.fillMaxWidth().height(180.dp), Alignment.Center) { LoadingIndicator() }
-                        else if (points.size < 2) Box(Modifier.fillMaxWidth().height(180.dp), Alignment.Center) {
+                        else if (points.size < 2 && !hasOutside) Box(Modifier.fillMaxWidth().height(180.dp), Alignment.Center) {
                             Text( // one room without data while others have some
                                 stringResource(if (period == Period.Day) Res.string.no_data else Res.string.no_history),
                                 Modifier.widthIn(max = 280.dp), style = MaterialTheme.typography.bodyMedium,
@@ -380,13 +388,16 @@ fun OverviewScreen(
                             )
                         }
                         else {
-                            StatsLine(points, MaterialTheme.typography.bodyMedium)
+                            if (points.size >= 2) StatsLine(points, MaterialTheme.typography.bodyMedium)
                             val temps = points.mapNotNull { it.current }
                             if (temps.isNotEmpty()) Text(
                                 "${fmt1(temps.min())}–${fmt1(temps.max())}°", style = MaterialTheme.typography.bodySmall,
                             )
                             Spacer(Modifier.height(8.dp))
-                            TempChart(points, Modifier.fillMaxWidth().height(140.dp), shared, forecast = forecasts[room.id].orEmpty())
+                            TempChart(
+                                points, Modifier.fillMaxWidth().height(if (hasOutside) 180.dp else 140.dp), shared, forecast = forecasts[room.id].orEmpty(),
+                                outside = outside, outsideAhead = outsideAhead,
+                            )
                         }
                     }
                 }
@@ -446,11 +457,12 @@ private fun StatsLine(points: List<Point>, style: TextStyle) {
 }
 
 @Composable
-private fun Legend(predicted: Boolean = false) {
+private fun Legend(predicted: Boolean = false, outside: Boolean = false) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         LegendItem(Heat, stringResource(Res.string.legend_room))
         LegendItem(muted, stringResource(Res.string.legend_target))
+        if (outside) LegendItem(Outside, stringResource(Res.string.legend_outside))
         if (predicted) LegendItem(Heat, stringResource(Res.string.legend_predicted), dashed = true)
         LegendItem(Heat.copy(alpha = BelowAlpha), stringResource(Res.string.legend_below), height = 10.dp)
     }
@@ -469,7 +481,23 @@ private fun LegendItem(color: Color, label: String, height: androidx.compose.ui.
 }
 
 private const val BelowAlpha = 0.25f
+private val Outside = Color(0xFF3D8BD4) // cold blue, apart from the orange room line in both themes
 private val Dashes by lazy { PathEffect.dashPathEffect(floatArrayOf(8f, 6f)) } // lazy: unit tests have no Skia
+
+/**
+ * The chart's y bands, top first: the [room] range alone, or with [outside] merged into it when they are close, or
+ * both separately when at least [MinBreak]° apart, so 2° outside doesn't squash 23° inside into a flat line.
+ */
+internal fun axisBands(
+    room: ClosedFloatingPointRange<Double>, outside: ClosedFloatingPointRange<Double>?,
+): List<ClosedFloatingPointRange<Double>> = when {
+    outside == null -> listOf(room)
+    outside.endInclusive + MinBreak <= room.start -> listOf(room, outside) // winter: outside below
+    room.endInclusive + MinBreak <= outside.start -> listOf(outside, room) // a hot summer day: outside above
+    else -> listOf(minOf(room.start, outside.start)..maxOf(room.endInclusive, outside.endInclusive))
+}
+
+private const val MinBreak = 3.0
 
 /** Padded y range over all points, at least 4° tall so half a degree of sensor noise stays flat. */
 internal fun yRangeOf(points: List<Point>): ClosedFloatingPointRange<Double>? {
@@ -481,8 +509,16 @@ internal fun yRangeOf(points: List<Point>): ClosedFloatingPointRange<Double>? {
     return (lo - pad)..(hi + pad)
 }
 
+internal fun forecastLine(history: List<Point>, forecast: List<Point>): List<Point> {
+    val last = history.lastOrNull() ?: return forecast
+    val future = forecast.filter { it.time > last.time }
+    return if (future.isEmpty()) emptyList() else listOf(last) + future
+}
+
 /**
  * Room temperature (orange) and target (grey) over time; time below target is shaded, holes in the data stay empty.
+ * [outside] (points carrying the temperature in [Point.current]) is drawn thin and blue behind them on the same scale;
+ * when it is far from the room's range, the empty degrees between them are cut out (see [axisBands]).
  * Pass [yRange] to share one scale across several charts. A [forecast] continues both lines dashed after the last reading.
  */
 @OptIn(ExperimentalTime::class)
@@ -491,21 +527,29 @@ fun TempChart(
     points: List<Point>, modifier: Modifier, yRange: ClosedFloatingPointRange<Double>? = null,
     interactive: Boolean = false, // press or drag to read a value; off where the chart sits on a tappable card
     forecast: List<Point> = emptyList(),
+    outside: List<Point> = emptyList(), outsideAhead: List<Point> = emptyList(),
 ) {
     val pts = remember(points) { points.filter { it.time > 0 } } // the History tab recomposes on every poll
-    val ahead = remember(pts, forecast) { pts.lastOrNull()?.let { last -> listOf(last) + forecast.filter { it.time > last.time } }.orEmpty() }
-    val range = yRange ?: yRangeOf(pts + ahead)
-    if (pts.size < 2 || range == null) { Box(modifier, Alignment.Center) { Text(stringResource(Res.string.no_data)) }; return }
+    val ahead = remember(pts, forecast) { forecastLine(pts, forecast.filter { it.time > 0 }) }
+    val outAhead = remember(outside, outsideAhead) { forecastLine(outside, outsideAhead) }
+    val outRange = remember(outside, outAhead) { yRangeOf(outside + outAhead) }
+    val roomRange = yRange ?: yRangeOf(pts + ahead)
+    val range = roomRange ?: outRange
+    if ((pts.size < 2 && outRange == null) || range == null) {
+        Box(modifier, Alignment.Center) { Text(stringResource(Res.string.no_data)) }
+        return
+    }
+    val bands = axisBands(range, outRange.takeIf { roomRange != null })
 
     val measurer = rememberTextMeasurer()
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    val grid = MaterialTheme.colorScheme.outlineVariant
+    // From the card's content colour, so the lines show on every room colour (outlineVariant vanished on the blue ones).
+    val grid = LocalContentColor.current.copy(alpha = 0.22f)
     val label = TextStyle(fontSize = 10.sp, color = muted)
 
-    val yMin = range.start
-    val yMax = range.endInclusive
-    val t0 = pts.first().time // a young history fills the width; the header says how far back it goes
-    val t1 = ahead.last().time
+    val times = remember(pts, ahead, outside, outAhead) { (pts + ahead + outside + outAhead).map { it.time } }
+    val t0 = times.min()
+    val t1 = times.max().coerceAtLeast(t0 + 1)
     val pairs = remember(pts) { val gap = maxStep(pts); pts.zipWithNext().filter { (a, b) -> b.time - a.time <= gap } }
     val surface = MaterialTheme.colorScheme.inverseSurface
     val onSurface = MaterialTheme.colorScheme.inverseOnSurface
@@ -520,18 +564,46 @@ fun TempChart(
 
     Canvas(modifier.then(touch)) {
         val left = 32.dp.toPx()
+        val right = size.width
         val bottom = size.height - 16.dp.toPx()
-        fun x(t: Long) = left + (size.width - left) * (t - t0) / (t1 - t0).toFloat()
-        fun y(v: Double) = (bottom * (1 - (v - yMin) / (yMax - yMin))).toFloat()
+        fun x(t: Long) = left + (right - left) * (t - t0) / (t1 - t0).toFloat()
+        // Bands top to bottom with a small gap between them. Heights follow each band's degrees (one scale), except the
+        // room's band never gets under 55% or over 75%: it is what the card is about.
+        val gap = if (bands.size == 2) 12.dp.toPx() else 0f
+        val spans = bands.map { it.endInclusive - it.start }
+        val roomShare = (spans[bands.indexOf(range).coerceAtLeast(0)] / spans.sum()).coerceIn(0.55, 0.75)
+        val topH = if (bands.size == 1) bottom else ((bottom - gap) * if (bands[0] == range) roomShare else 1 - roomShare).toFloat()
+        val tops = listOf(0f, topH + gap)
+        val bots = listOf(topH, bottom)
+        fun inBand(i: Int, v: Double) = bots[i] - ((v - bands[i].start) / spans[i] * (bots[i] - tops[i])).toFloat()
+        fun y(v: Double) = when {
+            bands.size == 1 || v >= bands[0].start -> inBand(0, v)
+            v <= bands[1].endInclusive -> inBand(1, v)
+            else -> topH + gap / 2 // inside the cut-out degrees
+        }
 
-        // Horizontal grid with whole-degree labels (at most ~5 lines).
-        val span = (yMax - yMin).toInt().coerceAtLeast(1)
-        val step = ((span + 3) / 4).coerceAtLeast(1)
-        var v = ceil(yMin).toInt()
-        while (v <= yMax) {
-            drawLine(grid, Offset(left, y(v.toDouble())), Offset(size.width, y(v.toDouble())), 1f)
-            drawText(measurer, "$v°", Offset(0f, y(v.toDouble()) - 7.dp.toPx()), label)
-            v += step
+        // Horizontal grid with whole-degree labels per band, at least 16 dp apart.
+        bands.forEachIndexed { i, band ->
+            val perDegree = (bots[i] - tops[i]) / spans[i]
+            val step = listOf(1, 2, 5, 10, 20).firstOrNull { it * perDegree >= 16.dp.toPx() } ?: 50
+            var v = ceil(band.start / step).toInt() * step
+            while (v <= band.endInclusive) {
+                drawLine(grid, Offset(left, y(v.toDouble())), Offset(right, y(v.toDouble())), 1f)
+                drawText(measurer, "$v°", Offset(0f, y(v.toDouble()) - 7.dp.toPx()), label)
+                v += step
+            }
+        }
+        // The break: a zigzag across the cut-out degrees, from card edge to card edge. The Canvas doesn't clip, so it
+        // reaches past the chart into the card's 20 dp padding; the card's shape cuts it off at its edges.
+        if (bands.size == 2) {
+            val zig = Path()
+            val mid = topH + gap / 2
+            val tooth = 6.dp.toPx()
+            val bleed = 20.dp.toPx()
+            var zx = -bleed
+            zig.moveTo(zx, mid)
+            while (zx < size.width + bleed) { zx += tooth; zig.lineTo(zx, mid + if (((zx + bleed) / tooth).toInt() % 2 == 1) -gap / 4 else gap / 4) }
+            drawPath(zig, grid, style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
         }
 
         // Time labels on whole local hours (00, 06, 12, 18 for a day) or days, at most 5 of them.
@@ -541,7 +613,7 @@ fun TempChart(
         while (t <= t1) {
             val text = if (hours >= 24 * 3600L) dayMonth(t) else hhmm(t)
             val w = measurer.measure(text, label).size.width
-            val px = (x(t) - w / 2f).coerceIn(left, size.width - w)
+            val px = (x(t) - w / 2f).coerceIn(left, right - w)
             drawLine(grid, Offset(x(t), bottom), Offset(x(t), bottom + 2.dp.toPx()), 1f)
             drawText(measurer, text, Offset(px, bottom + 2.dp.toPx()), label)
             t += hours
@@ -561,6 +633,17 @@ fun TempChart(
         }
         drawPath(below, Heat.copy(alpha = BelowAlpha))
 
+        // Outside: thin, behind the room's lines.
+        if (outRange != null) {
+            val step = maxStep(outside)
+            val thin = 1.5.dp.toPx()
+            series(outside.zipWithNext().filter { (a, b) -> b.time - a.time <= step }, { it.current }, Outside, ::x, ::y, width = thin)
+            series(outAhead.zipWithNext(), { it.current }, Outside, ::x, ::y, Dashes, thin)
+            (outAhead.singleOrNull() ?: outside.singleOrNull()?.takeIf { outAhead.isEmpty() })?.let { p ->
+                p.current?.let { drawCircle(Outside, thin, Offset(x(p.time), y(it))) }
+            }
+        }
+
         series(pairs, { it.target }, muted, ::x, ::y)
         series(pairs, { it.current }, Heat, ::x, ::y)
         val next = ahead.zipWithNext()
@@ -569,7 +652,7 @@ fun TempChart(
 
         // Crosshair on the reading nearest the finger.
         touchX?.let { tx ->
-            val p = pts.minBy { kotlin.math.abs(x(it.time) - tx) }
+            val p = pts.minByOrNull { kotlin.math.abs(x(it.time) - tx) } ?: return@let
             val px = x(p.time)
             drawLine(muted, Offset(px, 0f), Offset(px, bottom), 1.dp.toPx())
             p.current?.let { drawCircle(Heat, 4.dp.toPx(), Offset(px, y(it))) }
@@ -588,14 +671,14 @@ fun TempChart(
 
 private fun DrawScope.series(
     pairs: List<Pair<Point, Point>>, value: (Point) -> Double?, color: Color,
-    x: (Long) -> Float, y: (Double) -> Float, effect: PathEffect? = null,
+    x: (Long) -> Float, y: (Double) -> Float, effect: PathEffect? = null, width: Float = 2.dp.toPx(),
 ) {
     pairs.forEach { (a, b) ->
         val va = value(a) ?: return@forEach
         val vb = value(b) ?: return@forEach
         drawLine(
             color, Offset(x(a.time), y(va)), Offset(x(b.time), y(vb)),
-            strokeWidth = 2.dp.toPx(), pathEffect = effect,
+            strokeWidth = width, pathEffect = effect,
         )
     }
 }

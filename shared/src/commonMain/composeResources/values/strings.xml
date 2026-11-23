@@ -53,6 +53,7 @@
     <string name="smart_rejected_schedule">The controller did not accept the change (this room follows its schedule).</string>
     <string name="legend_room">Room</string>
     <string name="legend_target">Target</string>
+    <string name="legend_outside">Outside</string>
     <string name="below_for">Below target %1$s</string>
     <string name="never_below">Never below target</string>
     <string name="reached_in">Reached target in %1$s</string>

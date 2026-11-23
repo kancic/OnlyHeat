@@ -62,11 +62,16 @@ suspend fun endExpiredBoosts(api: HeatApi, key: String?, s: Settings) {
     }
 }
 
-/** Forgets away, boosts, alert history and remembered targets, so a logout doesn't leak them into the next account. */
-internal fun clearAccountState(s: Settings) {
+/** Clear controller state before allowing the next login. Ignore logout callbacks from an old session. */
+internal fun clearSession(s: Settings, key: String): Boolean {
+    if (savedAuthKey(s) != key) return false
     s.remove(SAVED_LAN_TARGET)
     savePin(s, null) // the dashboard PIN belongs to the controller just logged out of
+    s.remove("allTarget")
+    s.remove(controllerSerialSetting(key))
     s.keys.filter { k -> listOf("away.", "boost.", "watch.", "lastTarget.").any(k::startsWith) }.forEach(s::remove)
+    s.remove("authKey")
+    return true
 }
 
 // ---------- Alerts ----------

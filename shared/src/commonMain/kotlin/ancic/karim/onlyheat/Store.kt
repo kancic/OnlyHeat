@@ -48,17 +48,44 @@ internal expect fun Scope.historyDbBuilder(): RoomDatabase.Builder<HistoryDb>
 
 internal fun Reading.point() = Point(time, measured, target)
 
+internal fun outsideId(key: String, s: Settings): String {
+    val serial = s.getStringOrNull(controllerSerialSetting(key))
+    // Existing pairings and replies without a serial are isolated by their key's fingerprint.
+    return if (serial == null) "outside:key:${fingerprint(key)}" else "outside:serial:${fingerprint(serial)}"
+}
+
+/** The outside temperature as chart points (in [Point.current], no target), e.g. for its own chart. */
+internal fun List<Point>.outside() = filter { it.time > 0 && it.outside != null }
+    .distinctBy { it.time }.sortedBy { it.time }.map { Point(it.time, it.outside, null) }
+
 suspend fun ReadingDao.store(roomId: String, log: List<Point>) =
     insert(log.filter { it.time > 0 }.map { Reading(roomId, it.time, it.current, it.target) })
 
 /**
- * Copies every room's last ~25 h from the server into the local [history], unless that was done within [every].
+ * Copies recent room and outdoor logs into [history]. Each sync is due [every] after its last success.
  * Has to run at least daily for gap-free history: the Android worker does, desktop/iOS only while the app is open.
  */
 suspend fun syncHistory(api: HeatApi, history: ReadingDao, key: String, s: Settings, every: Duration = 6.hours) {
     val now = nowSeconds()
-    if (now - s.getLong("history.synced", 0) < every.inWholeSeconds) return
-    // One room at a time: the server relays to the controller serially, parallel calls time each other out.
-    api.home(key).rooms.forEach { history.store(it.id, api.roomLog(key, it.id)) }
-    s.putLong("history.synced", now)
+    val outside = outsideId(key, s)
+    val roomSync = "history.synced.$outside"
+    val outsideSync = "history.outdoor.$outside"
+    fun due(setting: String) = now - s.getLong(setting, 0) >= every.inWholeSeconds
+
+    val rooms = attempt {
+        if (due(roomSync)) {
+            // The controller handles relayed calls serially.
+            api.home(key).rooms.forEach { history.store(it.id, api.roomLog(key, it.id)) }
+            s.putLong(roomSync, now)
+        }
+    }
+    if (rooms.exceptionOrNull() is AuthExpired) rooms.getOrThrow()
+    if (due(outsideSync)) {
+        attempt {
+            val points = api.last24h(key).flatMap { it.points }.outside()
+            if (points.isNotEmpty()) history.store(outside, points)
+            s.putLong(outsideSync, now)
+        }.onFailure { log("outside history failed", it) }
+    }
+    rooms.getOrThrow()
 }

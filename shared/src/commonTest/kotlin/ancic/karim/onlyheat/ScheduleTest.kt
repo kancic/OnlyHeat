@@ -23,17 +23,6 @@ class ScheduleTest {
         assertEquals(null, parseApiPin("<title>Dashboard | TermoTehnik PI</title>"))
     }
 
-    @Test fun outsideTempFromDashboard() {
-        // Firmware 1.0.9.2.0 /dashboard weather cards, captured 2026-11-23.
-        val dashboard = """<img style="width:90px; padding: 1rem" src="http://vortex.accuweather.com/adc2010/images/slate/icons/06.svg">
-            <small>Temperature:</small> <strong class="d-inline-block">7.8 ̊C</strong>
-            <small>Real Feel:</small> <strong class="d-inline-block">9.2 ̊C</strong>
-            <small>Maximum:</small> <strong class="d-inline-block">-2.5 ̊C</strong>"""
-        assertEquals(Weather(7.8, "🌥️"), parseWeather(dashboard))
-        assertEquals(-0.5, parseWeather("""<small>Temperature:</small> <strong class="d-inline-block">-0.5 ̊C</strong>""").temp)
-        assertEquals(Weather(null, null), parseWeather("""icons/00.svg <small>Temperature:</small> <strong class="d-inline-block"> ̊C</strong>"""))
-    }
-
     @Test fun parseScheduleFromRealPage() {
         val s = parseSchedule(page)
         assertEquals(listOf("3" to "Spavaca soba", "2" to "Dnevni boravak/kuhinja", "1" to "Kupaona"), s.rooms)
