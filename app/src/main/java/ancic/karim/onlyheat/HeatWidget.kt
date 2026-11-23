@@ -69,6 +69,7 @@ private fun Preferences.pendingTarget(roomId: String) = this[pendingKey(roomId)]
     ?.takeIf { System.currentTimeMillis() - (this[pendingAtKey(roomId)] ?: 0) < PENDING_TTL_MS }
 private val RoomId = ActionParameters.Key<String>("roomId")
 private val Target = ActionParameters.Key<Double>("target")
+private val ScheduleTipRequest = ActionParameters.Key<Boolean>(SCHEDULE_TIP_EXTRA)
 
 /** Home-screen widget: every room's temperature, with −/+ for the target. Tapping elsewhere opens the app. */
 class HeatWidget : GlanceAppWidget() {
@@ -210,13 +211,13 @@ private fun RoomCard(room: Room, target: Double?, modifier: GlanceModifier) {
             style = TextStyle(color = fg, fontSize = 16.sp, textAlign = TextAlign.Center),
         )
         else Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            StepButton("−", room.id, (target - STEP).coerceAtLeast(MIN_T))
+            StepButton("−", room.id, (target - STEP).coerceAtLeast(MIN_T), enabled = !room.schedule)
             Text(
                 "${fmt1(target)}°", GlanceModifier.defaultWeight(),
                 style = TextStyle(color = fg, fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
                 maxLines = 1,
             )
-            StepButton("+", room.id, (target + STEP).coerceAtMost(MAX_T))
+            StepButton("+", room.id, (target + STEP).coerceAtMost(MAX_T), enabled = !room.schedule)
         }
     }
 }
@@ -232,13 +233,28 @@ private fun More(context: Context, count: Int, modifier: GlanceModifier) {
 }
 
 @Composable
-private fun StepButton(label: String, roomId: String, target: Double) {
+private fun StepButton(label: String, roomId: String, target: Double, enabled: Boolean) {
+    val colors = GlanceTheme.colors
+    val button = GlanceModifier.width(40.dp).height(28.dp).cornerRadius(14.dp)
+    val modifier = if (enabled) {
+        button.background(colors.surface)
+            .clickable(actionRunCallback<StepTarget>(actionParametersOf(RoomId to roomId, Target to target)))
+    } else {
+        button.background(colors.surfaceVariant)
+            .clickable(actionStartActivity<MainActivity>(actionParametersOf(ScheduleTipRequest to true)))
+    }
     Box(
-        GlanceModifier.width(40.dp).height(28.dp).cornerRadius(14.dp).background(GlanceTheme.colors.surface)
-            .clickable(actionRunCallback<StepTarget>(actionParametersOf(RoomId to roomId, Target to target))),
+        modifier,
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold))
+        Text(
+            label,
+            style = TextStyle(
+                color = if (enabled) colors.onSurface else colors.onSurfaceVariant,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+            ),
+        )
     }
 }
 

@@ -184,6 +184,8 @@
     <string name="state_warm">Dovoljno toplo</string>
     <string name="state_off">Grijanje isključeno</string>
     <string name="state_cold">Prehladno</string>
-    <string name="tour_schedule_title">Ne možete promijeniti sobu?</string>
-    <string name="tour_schedule">Ako na kartici piše „Raspored”, temperaturu ne možete mijenjati. Uklonite raspored pod Regulator → Raspored i tada možete.</string>
+    <string name="schedule_locked">Određuje raspored</string>
+    <string name="schedule_tip_title">Raspored je aktivan</string>
+    <string name="schedule_tip">Raspored određuje temperaturu ove sobe. Za promjenu temperature uredite ili uklonite aktivni unos.</string>
+    <string name="open_schedule">Otvori raspored</string>
 </resources>

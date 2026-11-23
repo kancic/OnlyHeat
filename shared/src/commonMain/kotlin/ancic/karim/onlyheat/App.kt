@@ -62,12 +62,15 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import androidx.navigation3.ui.NavDisplay
+import androidx.navigation3.ui.defaultPopTransitionSpec
 import com.russhwolf.settings.Settings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.getString
@@ -126,6 +129,7 @@ fun App(
     backgroundAlerts: ((Boolean) -> Unit)? = null,
     dynamicScheme: (@Composable (dark: Boolean) -> ColorScheme?)? = null,
     statusBarOnDark: (Boolean) -> Unit = {},
+    scheduleTipRequests: Flow<Unit> = emptyFlow(),
 ) {
     OnlyHeatTheme(dynamicScheme) {
         Surface(Modifier.fillMaxSize()) {
@@ -138,7 +142,7 @@ fun App(
                 requestLocalNetwork,
                 statusBarOnDark
             ) { pairing -> savePairing(settings, pairing); key = pairing.key }
-            else Main(api, k, requestLocalNetwork, notify, wakeAt, backgroundAlerts) {
+            else Main(api, k, requestLocalNetwork, notify, wakeAt, backgroundAlerts, scheduleTipRequests) {
                 if (clearSession(settings, k)) key = null
             }
         }
@@ -364,6 +368,7 @@ private fun Main(
     notify: (suspend (String) -> Unit)?,
     wakeAt: ((Long) -> Unit)?,
     backgroundAlerts: ((Boolean) -> Unit)?,
+    scheduleTipRequests: Flow<Unit>,
     onLogout: () -> Unit,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -385,7 +390,11 @@ private fun Main(
     val backStack =
         rememberSaveable(saver = backStackSaver) { mutableStateListOf<Screen>(Screen.Main) }
     var tab by rememberSaveable { mutableStateOf(Tab.Rooms) }
+    var showScheduleTip by rememberSaveable { mutableStateOf(false) }
     val host = model.home?.ip ?: HOTSPOT
+    LaunchedEffect(scheduleTipRequests) {
+        scheduleTipRequests.collect { showScheduleTip = true }
+    }
 
     // Back from another tab returns to Rooms before leaving the app. Lives here, not in MainTabs, because
     // MainTabs stays composed during a push transition and would steal the back press from NavDisplay.
@@ -395,6 +404,7 @@ private fun Main(
         onBackCompleted = { tab = Tab.Rooms }
     )
 
+    val backTransition = defaultPopTransitionSpec<Screen>()
     SharedTransitionLayout {
         CompositionLocalProvider(LocalSharedScope provides this) {
             NavDisplay(
@@ -406,6 +416,8 @@ private fun Main(
                     rememberViewModelStoreNavEntryDecorator()
                 ),
                 sharedTransitionScope = this,
+                popTransitionSpec = backTransition,
+                predictivePopTransitionSpec = { backTransition(this) },
                 entryProvider = { screen ->
                     when (screen) {
                         Screen.Main -> NavEntry(screen) {
@@ -419,6 +431,8 @@ private fun Main(
                                 requestLocalNetwork,
                                 backgroundAlerts,
                                 onLogout = onLogout,
+                                onScheduleLocked = { showScheduleTip = true },
+                                scheduleTipOpen = showScheduleTip,
                             ) {
                                 backStack += it
                             }
@@ -447,6 +461,13 @@ private fun Main(
             )
         }
     }
+    if (showScheduleTip) ScheduleTip(
+        onDismiss = { showScheduleTip = false },
+        onOpenSchedule = {
+            showScheduleTip = false
+            if (backStack.lastOrNull() != Screen.ScheduleEditor) backStack += Screen.ScheduleEditor
+        },
+    )
 }
 
 internal val LocalSharedScope = staticCompositionLocalOf<SharedTransitionScope?> { null }
@@ -477,6 +498,8 @@ private fun MainTabs(
     requestLocalNetwork: suspend () -> Boolean,
     backgroundAlerts: ((Boolean) -> Unit)?,
     onLogout: () -> Unit,
+    onScheduleLocked: () -> Unit,
+    scheduleTipOpen: Boolean, // holds the welcome tour back, so two dialogs never stack
     open: (Screen) -> Unit,
 ) {
     val tabContent = @Composable {
@@ -490,8 +513,8 @@ private fun MainTabs(
         }) { displayedTab ->
             when (displayedTab) {
                 Tab.Rooms -> {
-                    if (tab == Tab.Rooms) RoomsTip()
-                    RoomsTab(model) { open(Screen.RoomDetail(it)) }
+                    if (tab == Tab.Rooms && !scheduleTipOpen) RoomsTip()
+                    RoomsTab(model, onScheduleLocked) { open(Screen.RoomDetail(it)) }
                 }
                 Tab.History -> OverviewScreen(
                     api,
@@ -589,7 +612,7 @@ private fun WeatherPill(emoji: String?, outside: Double, big: Boolean) {
 }
 
 @Composable
-private fun RoomsTab(model: HomeModel, openRoom: (String) -> Unit) {
+private fun RoomsTab(model: HomeModel, onScheduleLocked: () -> Unit, openRoom: (String) -> Unit) {
     val scroll = collapsingBar()
     val pull = rememberPullToRefreshState()
     Scaffold(
@@ -712,6 +735,7 @@ private fun RoomsTab(model: HomeModel, openRoom: (String) -> Unit) {
                                 model.boosts.any { it.room == r.id },
                                 { model.lastTarget(r.id) },
                                 Modifier.springIn(i + 2),
+                                onScheduleLocked = onScheduleLocked,
                                 onOpen = { openRoom(r.id) }) { t -> model.setTarget(r, t) }
                         }
                         if (h.rooms.isEmpty()) item(span = span) { Text(stringResource(Res.string.no_rooms)) }
@@ -1108,6 +1132,7 @@ private fun RoomCard(
     boosted: Boolean,
     lastTarget: () -> Double,
     modifier: Modifier,
+    onScheduleLocked: () -> Unit,
     onOpen: () -> Unit,
     onTarget: (Double?) -> Unit
 ) {
@@ -1163,7 +1188,7 @@ private fun RoomCard(
                         color = LocalContentColor.current.copy(alpha = if (active) 1f else 0.75f),
                     )
                 }
-                Switch(on, { onTarget(if (it) lastTarget() else null) })
+                Switch(on, { if (room.schedule) onScheduleLocked() else onTarget(if (it) lastTarget() else null) })
             }
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1173,9 +1198,10 @@ private fun RoomCard(
                     Modifier.weight(1f)
                 )
                 if (on) TempStepper(
-                    room.target!!,
+                    room.target,
                     onTarget,
-                    label = stringResource(Res.string.target)
+                    label = stringResource(Res.string.target),
+                    onLocked = onScheduleLocked.takeIf { room.schedule },
                 )
                 else Text(
                     stringResource(Res.string.off),

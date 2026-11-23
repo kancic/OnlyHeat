@@ -11,10 +11,9 @@ class TipsTest {
         val node = Preferences.userRoot().node("onlyheat-test-${UUID.randomUUID()}")
         try {
             val s = PreferencesSettings(node)
-            val tour = listOf("room-card-pictures", "scheduled-room-locked", "away")
+            val tour = listOf("room-card-pictures", "away")
             s.putBoolean("tip.room-card-pictures", true)
-            s.putBoolean("tip.scheduled-room-locked", true)
-            s.putBoolean("tip.history-periods", true) // A tip from an older version.
+            s.putBoolean("tip.scheduled-room-locked", true) // A tip from an older version.
             s.putString("authKey", "k")
             assertEquals(listOf("away"), unseenTips(s, tour))
             resetTips(s)

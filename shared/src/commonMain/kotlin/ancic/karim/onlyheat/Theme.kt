@@ -1,5 +1,8 @@
 package ancic.karim.onlyheat
 
+import ancic.karim.onlyheat.res.Res
+import ancic.karim.onlyheat.res.schedule_locked
+import org.jetbrains.compose.resources.stringResource
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -21,6 +24,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -107,30 +112,35 @@ internal fun TempStepper(
     onChange: (Double) -> Unit,
     buttonSize: Dp = 52.dp,
     label: String? = null,
+    onLocked: (() -> Unit)? = null,
 ) {
     // Tint of whatever card we sit on, so the buttons stay visible on every container color.
     val content = LocalContentColor.current
+    val locked = stringResource(Res.string.schedule_locked)
     val colors = IconButtonDefaults.filledTonalIconButtonColors(
-        containerColor = content.copy(alpha = 0.12f), contentColor = content,
+        containerColor = content.copy(alpha = 0.12f),
+        contentColor = if (onLocked != null) content.copy(alpha = 0.5f) else content,
     )
+    // Locked buttons still take taps (they explain the schedule), so TalkBack has to hear why they look dimmed.
+    val lockedState = if (onLocked != null) Modifier.semantics { stateDescription = locked } else Modifier
     Row(verticalAlignment = Alignment.CenterVertically) {
         FilledTonalIconButton(
-            onClick = { onChange((value - STEP).coerceAtLeast(MIN_T)) },
+            onClick = onLocked ?: { onChange((value - STEP).coerceAtLeast(MIN_T)) },
             shapes = IconButtonDefaults.shapes(),
-            enabled = value > MIN_T,
+            enabled = onLocked != null || value > MIN_T,
             colors = colors,
-            modifier = Modifier.size(buttonSize),
+            modifier = Modifier.size(buttonSize).then(lockedState),
         ) { Text("−", style = MaterialTheme.typography.titleLarge) }
         Column(Modifier.widthIn(min = 76.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             RollingTemp(value, MaterialTheme.typography.headlineSmallEmphasized, color = MaterialTheme.colorScheme.primary)
             label?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
         }
         FilledTonalIconButton(
-            onClick = { onChange((value + STEP).coerceAtMost(MAX_T)) },
+            onClick = onLocked ?: { onChange((value + STEP).coerceAtMost(MAX_T)) },
             shapes = IconButtonDefaults.shapes(),
-            enabled = value < MAX_T,
+            enabled = onLocked != null || value < MAX_T,
             colors = colors,
-            modifier = Modifier.size(buttonSize),
+            modifier = Modifier.size(buttonSize).then(lockedState),
         ) { Text("+", style = MaterialTheme.typography.titleLarge) }
     }
 }

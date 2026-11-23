@@ -1,6 +1,7 @@
 package ancic.karim.onlyheat
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -14,11 +15,17 @@ import androidx.core.view.WindowCompat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.get
 import com.russhwolf.settings.Settings
 
+internal const val SCHEDULE_TIP_EXTRA = "ancic.karim.onlyheat.SCHEDULE_TIP"
+
 class MainActivity : ComponentActivity() {
+    private val scheduleTipRequests = Channel<Unit>(Channel.CONFLATED)
+    private val scheduleTips = scheduleTipRequests.receiveAsFlow()
     private var pending: CompletableDeferred<Boolean>? = null
     private val askLocalNetwork = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         pending?.complete(it)
@@ -41,6 +48,7 @@ class MainActivity : ComponentActivity() {
         scheduleAlerts(alertsEnabled(get<Settings>()))
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) requestScheduleTip(intent)
         // Notifications tell the user when the controller ignored a change made just before leaving the app
         // or from the widget. Asked once; Settings is the place to change it later.
         val prefs = getPreferences(MODE_PRIVATE)
@@ -69,8 +77,22 @@ class MainActivity : ComponentActivity() {
                     WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars =
                         !onDark && !resources.configuration.isNightModeActive
                 },
+                scheduleTipRequests = scheduleTips,
             )
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        requestScheduleTip(intent)
+    }
+
+    // Recents relaunches with the widget's intent, and a request while logged out would wait for the next login.
+    private fun requestScheduleTip(intent: Intent) {
+        if (intent.getBooleanExtra(SCHEDULE_TIP_EXTRA, false) &&
+            intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0 &&
+            savedAuthKey(get<Settings>()) != null
+        ) scheduleTipRequests.trySend(Unit)
     }
 
     // Leaving the app: the widget should show what was just changed (or that we logged out).

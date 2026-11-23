@@ -145,19 +145,30 @@ internal fun RoomsTip() = FirstTimeTip(
             )
         }
     },
-    // The surprise people call support about: a scheduled room ignores the app.
-    TipPage("scheduled-room-locked", Res.string.tour_schedule_title, Res.string.tour_schedule) {
-        var t by remember { mutableStateOf(21.0) }
-        LaunchedEffect(t) { if (t != 21.0) { delay(700); t = 21.0 } }
-        Scene(warm(), warmInk()) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(stringResource(Res.string.schedule), style = MaterialTheme.typography.labelLarge)
-                TempStepper(t, { t = it }, label = stringResource(Res.string.target))
-            }
-        }
-    },
     TipPage("away", Res.string.tour_away_title, Res.string.tour_away) { AwayScene() },
 )
+
+@Composable
+internal fun ScheduleTip(onDismiss: () -> Unit, onOpenSchedule: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(Res.string.schedule_tip_title)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Scene(warm(), warmInk()) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(stringResource(Res.string.schedule), style = MaterialTheme.typography.labelLarge)
+                        TempStepper(21.0, {}, label = stringResource(Res.string.target), onLocked = {}) // locked, like the real card
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(stringResource(Res.string.schedule_tip))
+            }
+        },
+        dismissButton = { TextButton(onDismiss) { Text(stringResource(Res.string.tip_done)) } },
+        confirmButton = { TextButton(onOpenSchedule) { Text(stringResource(Res.string.open_schedule)) } },
+    )
+}
 
 /**
  * Three rooms heating, then "Go away": one after the other they fall asleep at 16°, then "I'm back" wakes each

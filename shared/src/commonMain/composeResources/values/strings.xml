@@ -183,6 +183,8 @@
     <string name="state_warm">Warm enough</string>
     <string name="state_off">Heating off</string>
     <string name="state_cold">Too cold</string>
-    <string name="tour_schedule_title">Can’t change a room?</string>
-    <string name="tour_schedule">If its card says “Schedule”, you can’t change its temperature. Remove the schedule under Controller → Schedule, then you can.</string>
+    <string name="schedule_locked">Set by the schedule</string>
+    <string name="schedule_tip_title">Schedule is active</string>
+    <string name="schedule_tip">The schedule sets this room’s temperature. Edit or remove the active entry to change it.</string>
+    <string name="open_schedule">Open schedule</string>
 </resources>
