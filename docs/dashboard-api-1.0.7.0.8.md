@@ -387,7 +387,7 @@ that have no endpoint: the room's `roomInverter`, notes and jumper ports (`modal
 ## 7. How this maps to the cloud API (`Api.kt`)
 
 The cloud (`https://api.smart-heating.co/api-remote/*`, multipart POST, `{"status":"OK"|"ERROR"}`) relays to the
-same controller. Most features exist on both sides:
+same controller. The full cloud reference is [`cloud-api-1.0.3.md`](cloud-api-1.0.3.md). Most features exist on both sides:
 
 | Feature | Local dashboard | Cloud |
 |---|---|---|
