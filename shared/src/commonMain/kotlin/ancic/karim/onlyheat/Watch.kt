@@ -46,7 +46,7 @@ internal fun removeBoost(s: Settings, room: String) = s.remove("boost.$room")
 
 /**
  * Ends boosts whose time is up: restores the old target, unless the user changed the target meanwhile.
- * Safe to call from anywhere (app poll, Android worker). Throws if the cloud can't be reached, so callers retry.
+ * Safe to call from the app or Android worker. Throws if the cloud can't be reached, so callers retry.
  */
 suspend fun endExpiredBoosts(api: HeatApi, key: String?, s: Settings) {
     key ?: return

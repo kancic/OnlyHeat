@@ -71,7 +71,9 @@ internal class ScheduleModel : ViewModel() {
 
 /** Edits the controller's schedule through its local dashboard (reachable on its Wi-Fi or the home Wi-Fi). */
 @Composable
-fun ScheduleScreen(host: String, requestLocalNetwork: suspend () -> Boolean, onBack: () -> Unit) {
+fun ScheduleScreen(
+    host: String, requestLocalNetwork: suspend () -> Boolean, onSaved: () -> Unit, onBack: () -> Unit,
+) {
     val settings = koinInject<Settings>()
     val controllerPicker = remember { LanControllerPicker(settings) }
     var pin by remember { mutableStateOf(savedPin(settings)) }
@@ -151,6 +153,7 @@ fun ScheduleScreen(host: String, requestLocalNetwork: suspend () -> Boolean, onB
                         saving = true
                         scope.launch {
                             m.save { local!!.save(it) }.onSuccess {
+                                onSaved()
                                 snackbar.showSnackbar(getString(Res.string.schedule_saved))
                             }.onFailure {
                                 if (it is WrongDashboardPin) clearWrongPin()

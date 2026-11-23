@@ -42,7 +42,8 @@ private data class PinPrompt(
 fun ControllerTab(
     device: String?, host: String, requestLocalNetwork: suspend () -> Boolean,
     cloudStatus: suspend () -> Throwable?, // null when the cloud can reach the controller right now
-    snackbar: SnackbarHostState, backgroundAlerts: ((Boolean) -> Unit)?, onLogout: () -> Unit, openSchedule: () -> Unit,
+    snackbar: SnackbarHostState, backgroundAlerts: ((Boolean) -> Unit)?, onRestarted: () -> Unit,
+    onLogout: () -> Unit, openSchedule: () -> Unit,
 ) {
     val settings = koinInject<Settings>()
     var pin by remember { mutableStateOf(savedPin(settings)) }
@@ -101,6 +102,7 @@ fun ControllerTab(
                     snackbar.showSnackbar(getString(Res.string.local_permission_denied)); return@launch
                 }
                 val back = LocalApi(host, p, settings) { controllerPicker.ask() }.rebootAndWait { cloudStatus() == null }
+                if (back) onRestarted()
                 snackbar.showSnackbar(getString(if (back) Res.string.restart_done else Res.string.restart_timeout))
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e

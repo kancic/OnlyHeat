@@ -70,8 +70,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.pluralStringResource
@@ -79,6 +82,9 @@ import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 internal val Heat = Color(0xFFFF5A00)
 internal val NightSky = Color(0xFF353D70)
@@ -117,7 +123,7 @@ private enum class Tab(val label: StringResource, val icon: ImageVector) {
  * [dynamicScheme] supplies a wallpaper-based scheme (Android 12+); null falls back to the orange palette.
  * [notify] shows a system notification; used instead of a snackbar when the app is in the background.
  * [wakeAt] runs [endExpiredBoosts] at that time (epoch ms) even if the app is closed; without it, boosts end
- * at the next poll while the app is open.
+ * while the app is visible or when it next starts.
  * [backgroundAlerts] turns periodic alert checks on/off; null hides the Alerts setting.
  * [statusBarOnDark] switches the status bar icons to light while a screen draws something dark behind them.
  */
@@ -183,13 +189,12 @@ internal class HomeModel(
     private var weatherAt = 0L
     val days = mutableStateOf<List<DaySummary>?>(null) // History tab, kept across navigation
     private val pending = mutableMapOf<String, Job>() // debounced writes per room id
-    private var ticks = 0
 
     suspend fun load() {
-        attempt { api.home(key) } // a cancel means polling paused, not an error
+        attempt { api.home(key) }
             .onSuccess { fresh ->
                 if (savedAuthKey(settings) != key) return
-                // Don't let a poll overwrite a value the user is still adjusting.
+                // Don't let a refresh overwrite a value the user is still adjusting.
                 val local = home?.rooms?.associateBy { it.id }.orEmpty()
                 home = fresh.copy(rooms = fresh.rooms.map { r ->
                     if (pending[r.id]?.isActive == true) r.copy(target = local[r.id]?.target) else r
@@ -205,21 +210,46 @@ internal class HomeModel(
             }
     }
 
-    /** One poll: end boosts whose time is up (if the background job hasn't), then reload. */
-    suspend fun tick() {
-        attempt { endExpiredBoosts(api, key, settings) } // load() below reports the error
-        boosts = loadBoosts(settings)
+    suspend fun refreshOnResume() {
+        restoreExpiredBoosts()
         if (!awayBusy) away =
             awaySaved(settings) != null // goAway saves first, but shows away only once done
         load()
         loadWeather(force = false)
-        // Keeps the local history gap-free while the app runs (a no-op unless 6 h have passed).
-        // Not on the first tick: the slow server would make the screen's own first loads time out.
-        if (ticks++ > 0) attempt { syncHistory(api, history, key, settings) } // next tick tries again
     }
 
-    // ponytail: AccuWeather refreshes about hourly; one slow (~3 s) cloud call per 15 min or pull to refresh.
-    // A failed call keeps the last value: it is at most 15 minutes older than it would have been.
+    private val restoreLock = Mutex()
+
+    /** True when there is nothing left to retry: restored, or logged out. */
+    private suspend fun restoreExpiredBoosts(): Boolean = restoreLock.withLock {
+        val result = attempt { endExpiredBoosts(api, key, settings) }
+        boosts = loadBoosts(settings)
+        val expired = result.exceptionOrNull() is AuthExpired
+        if (expired) onLoggedOut()
+        result.isSuccess || expired
+    }
+
+    suspend fun watchBoostExpiry() {
+        snapshotFlow { boosts.minOfOrNull { it.until } }.collectLatest { until ->
+            if (until == null) return@collectLatest
+            delay((until - nowSeconds()).coerceAtLeast(0).seconds)
+            // Retry a few times, then wait for the next resume or worker run
+            var tries = 0
+            while (!restoreExpiredBoosts() && ++tries < 5) delay(1.minutes)
+            refreshRooms()
+        }
+    }
+
+    suspend fun syncHistoryWhileStarted() {
+        // Give the initial screen loads time to finish on the slow controller.
+        delay(30.seconds)
+        while (true) {
+            val result = attempt { syncHistory(api, history, key, settings) }
+            delay(if (result.isSuccess) 6.hours else 1.hours)
+        }
+    }
+
+    // Limit automatic weather requests to one every 15 minutes across foreground entries.
     private suspend fun loadWeather(force: Boolean) {
         if (!force && nowSeconds() - weatherAt <= 15 * 60) return
         weatherAt = nowSeconds()
@@ -322,6 +352,11 @@ internal class HomeModel(
     fun refresh() =
         scope.launch { refreshing = true; load(); refreshing = false; loadWeather(force = true) }
 
+    fun refreshRooms() {
+        // Give the cloud a moment to apply the change, or the reload brings back the old state.
+        scope.launch { delay(2.seconds); load() }
+    }
+
     fun setTarget(room: Room, target: Double?) {
         home =
             home?.let { h -> h.copy(rooms = h.rooms.map { if (it.id == room.id) it.copy(target = target) else it }) }
@@ -377,12 +412,10 @@ private fun Main(
     model.notify = notify
     model.wakeAt = wakeAt
     model.onLoggedOut = onLogout
-    // Poll only while the app is on screen; resuming refreshes right away.
-    LaunchedEffect(model) {
+    LaunchedEffect(model, lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
-                model.tick(); delay(30_000)
-            }
+            launch { model.watchBoostExpiry() }
+            model.syncHistoryWhileStarted()
         }
     }
 
@@ -390,6 +423,15 @@ private fun Main(
     val backStack =
         rememberSaveable(saver = backStackSaver) { mutableStateListOf<Screen>(Screen.Main) }
     var tab by rememberSaveable { mutableStateOf(Tab.Rooms) }
+    LaunchedEffect(model, lifecycle, tab) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            if (tab == Tab.Rooms) {
+                model.refreshOnResume()
+                // Slow poll, only while the Rooms tab is on screen
+                while (true) { delay(2.minutes); model.refreshRooms() }
+            }
+        }
+    }
     var showScheduleTip by rememberSaveable { mutableStateOf(false) }
     val host = model.home?.ip ?: HOTSPOT
     LaunchedEffect(scheduleTipRequests) {
@@ -447,13 +489,15 @@ private fun Main(
                                 model.boosts.find { it.room == room.id },
                                 onBoost = { model.boost(room, it) },
                                 onStopBoost = { model.stopBoost(room) },
+                                onSmartChanged = model::refreshRooms,
                             ) { backStack.removeLastOrNull() }
                         }
 
                         Screen.ScheduleEditor -> NavEntry(screen) {
                             ScheduleScreen(
                                 host,
-                                requestLocalNetwork
+                                requestLocalNetwork,
+                                onSaved = model::refreshRooms,
                             ) { backStack.removeLastOrNull() }
                         }
                     }
@@ -531,6 +575,7 @@ private fun MainTabs(
                         cloudStatus = { attempt { api.home(key) }.exceptionOrNull() },
                         snackbar = model.snackbar,
                         backgroundAlerts = backgroundAlerts,
+                        onRestarted = model::refreshRooms,
                         onLogout = onLogout,
                     ) { open(Screen.ScheduleEditor) }
                 }

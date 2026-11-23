@@ -84,7 +84,7 @@ private fun SubScreen(
 @Composable
 fun RoomScreen(
     api: HeatApi, key: String, room: Room, boost: Boost?,
-    onBoost: (minutes: Int) -> Unit, onStopBoost: () -> Unit, onBack: () -> Unit,
+    onBoost: (minutes: Int) -> Unit, onStopBoost: () -> Unit, onSmartChanged: () -> Unit, onBack: () -> Unit,
 ) {
     val settings = koinInject<Settings>()
     val history = koinInject<ReadingDao>()
@@ -177,7 +177,10 @@ fun RoomScreen(
             BoostCard(boost, onBoost, onStopBoost)
             val supported = remember { hasThermalIntelligence(settings.getStringOrNull(FIRMWARE)) }
             // Old firmware: only show it while it's on, so it can be turned off.
-            if (supported || smart?.on == true) SmartCard(api, key, room, smart, smartError, supported) { smart = it }
+            if (supported || smart?.on == true) SmartCard(api, key, room, smart, smartError, supported) {
+                smart = it
+                onSmartChanged()
+            }
           }
     }
 }
