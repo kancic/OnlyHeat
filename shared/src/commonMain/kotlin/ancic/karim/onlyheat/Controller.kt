@@ -390,17 +390,22 @@ private fun Section(
     else Card(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge, colors = colors, content = content)
 }
 
-/** Background checks: controller offline, room too cold, open window. The check itself is in Watch.kt. */
+/** Background checks: controller offline, room too cold, open window, not warming up, too hot, AC tip. The check itself is in Watch.kt. */
 @Composable
 private fun AlertsCard(modifier: Modifier, settings: Settings, enable: (Boolean) -> Unit) {
     var on by remember { mutableStateOf(alertsEnabled(settings)) }
     var cold by remember { mutableStateOf(coldSetting(settings)) }
+    var warm by remember { mutableStateOf(warmSetting(settings)) }
     Section(
         stringResource(Res.string.alerts_title), stringResource(Res.string.alerts_desc), modifier = modifier,
         below = if (on) {{
             Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(Res.string.alerts_cold), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                 TempStepper(cold, { cold = it; settings.putDouble("alerts.cold", it) }, buttonSize = 44.dp)
+            }
+            Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(Res.string.alerts_warm), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                TempStepper(warm, { warm = it; settings.putDouble("alerts.warm", it) }, buttonSize = 44.dp)
             }
         }} else null,
     ) {

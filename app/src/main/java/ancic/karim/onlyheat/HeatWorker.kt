@@ -37,12 +37,12 @@ class HeatWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 
 private val online = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
 
-/** Every ~15 minutes (the system minimum) while alerts are on. */
+/** Every ~20 minutes while alerts are on. UPDATE so a changed interval reaches phones that already have the job. */
 fun Context.scheduleAlerts(on: Boolean) {
     val wm = WorkManager.getInstance(this)
     if (on) wm.enqueueUniquePeriodicWork(
-        "alerts", ExistingPeriodicWorkPolicy.KEEP,
-        PeriodicWorkRequestBuilder<HeatWorker>(15, TimeUnit.MINUTES).setConstraints(online).build(),
+        "alerts", ExistingPeriodicWorkPolicy.UPDATE,
+        PeriodicWorkRequestBuilder<HeatWorker>(20, TimeUnit.MINUTES).setConstraints(online).build(),
     )
     else wm.cancelUniqueWork("alerts")
 }

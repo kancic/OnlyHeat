@@ -19,6 +19,13 @@ class ApiTest {
         assertEquals(Room("2", "Dnevni", 19.5, null, 41.0, heating = true, smart = false, schedule = false), h.rooms[1])
     }
 
+    @Test fun parsesCoolingModeSeparatelyFromValveActivity() {
+        val json = """{"rooms":[{"id":"1","isHeating":"cooling","isWorking":true}]}"""
+        val room = parseHome(Json.parseToJsonElement(json).jsonObject).rooms.single()
+        assertEquals(true, room.cooling)
+        assertEquals(true, room.heating)
+    }
+
     @Test fun formatsLikeTheOriginalApp() {
         assertEquals("21", fmt(21.0)); assertEquals("21.5", fmt(21.5)); assertEquals("", fmt(null))
         assertEquals("-0.5", fmt1(-0.5)); assertEquals("24.7", fmt1(24.687))

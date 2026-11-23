@@ -28,6 +28,7 @@ data class Room(
     val heating: Boolean, // valve open right now
     val smart: Boolean,
     val schedule: Boolean, // controller follows its own schedule and ignores manual setpoints
+    val cooling: Boolean = false,
 )
 
 data class Home(
@@ -202,6 +203,7 @@ internal fun parseHome(root: JsonObject): Home {
             heating = r.bool("isWorking"),
             smart = r.bool("isSmart"),
             schedule = r.bool("isSchedule"),
+            cooling = r.str("isHeating") == "cooling",
         )
     }
     return Home(rooms, root.num("s7Temp"), root.num("s7Hum"), root.str("globalDeviceName"), root.str("globalIpAddress"))

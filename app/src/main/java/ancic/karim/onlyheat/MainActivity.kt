@@ -15,6 +15,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
+import org.koin.android.ext.android.get
+import com.russhwolf.settings.Settings
 
 class MainActivity : ComponentActivity() {
     private var pending: CompletableDeferred<Boolean>? = null
@@ -36,6 +38,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         scheduleHistorySync()
+        scheduleAlerts(alertsEnabled(get<Settings>()))
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         // Notifications tell the user when the controller ignored a change made just before leaving the app
