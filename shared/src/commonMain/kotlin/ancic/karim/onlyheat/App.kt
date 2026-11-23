@@ -129,6 +129,8 @@ private class HomeModel(
     private val onLoggedOut: () -> Unit,
 ) {
     var away by mutableStateOf(awaySaved(settings) != null)
+    var awayBusy by mutableStateOf(false) // Away / I'm back writing; the cards switch once it's done
+        private set
     var awayTemp by mutableStateOf(settings.getDouble("away.temp", 16.0))
     var boosts by mutableStateOf(loadBoosts(settings))
         private set
@@ -152,7 +154,7 @@ private class HomeModel(
                 })
                 error = null
                 // Away and boost temperatures are temporary: don't make them what the switch restores.
-                if (!away) fresh.rooms.filter { r -> boosts.none { it.room == r.id } }
+                if (!away && !awayBusy) fresh.rooms.filter { r -> boosts.none { it.room == r.id } }
                     .forEach { r -> r.target?.let { rememberTarget(r.id, it) } }
             }
             .onFailure {
@@ -165,7 +167,7 @@ private class HomeModel(
     suspend fun tick() {
         attempt { endExpiredBoosts(api, key, settings) } // load() below reports the error
         boosts = loadBoosts(settings)
-        away = awaySaved(settings) != null
+        if (!awayBusy) away = awaySaved(settings) != null // goAway saves first, but shows away only once done
         load()
         loadWeather(force = false)
         // Keeps the local history gap-free while the app runs (a no-op unless 6 h have passed).
@@ -187,10 +189,12 @@ private class HomeModel(
     /** Lowers every room that is on to [awayTemp] and remembers what each one had. */
     fun goAway() = scope.launch {
         val h = home ?: return@launch
+        if (awayBusy) return@launch
+        awayBusy = true
         settings.putDouble("away.temp", awayTemp)
         val boosted = boosts.associateBy { it.room }
         val saved = h.rooms.associate { it.id to (boosted[it.id]?.restore ?: it.target) } // a boost isn't "theirs"
-        saveAway(settings, saved); away = true
+        saveAway(settings, saved) // first, so a crash mid-way can still come back
         boosted.keys.forEach { removeBoost(settings, it) }; boosts = loadBoosts(settings)
         val heated = h.rooms.filter { saved[it.id] != null } // rooms that are off stay off
         val lowered = mutableListOf<Room>()
@@ -200,11 +204,12 @@ private class HomeModel(
             if (e is kotlinx.coroutines.CancellationException) throw e
             // Don't leave it half away: undo what was lowered, so Away shows again and can simply be retried.
             attempt { lowered.forEach { api.setTemp(key, it.id, saved[it.id]) } } // else the error below covers it
-            saveAway(settings, null); away = false
-            snackbar.showSnackbar(errorText(e)); load(); return@launch
+            saveAway(settings, null); load(); awayBusy = false
+            snackbar.showSnackbar(errorText(e)); return@launch
         }
         delay(4000) // read back, like single rooms
         load()
+        away = true; awayBusy = false
         val kept = home?.rooms.orEmpty().filter { r -> heated.any { it.id == r.id } && r.target != awayTemp }
         snackbar.showSnackbar(
             if (kept.isEmpty()) getString(Res.string.away_set, fmt1(awayTemp))
@@ -216,14 +221,19 @@ private class HomeModel(
     /** "I'm back": puts every room back to what it had before [goAway]. */
     fun comeBack() = scope.launch {
         val saved = awaySaved(settings) ?: return@launch
+        if (awayBusy) return@launch
+        awayBusy = true
         try {
             saved.forEach { (id, t) -> if (t != null) api.setTemp(key, id, t) }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            snackbar.showSnackbar(errorText(e)); load(); return@launch // still away, so it can be retried
+            load(); awayBusy = false
+            snackbar.showSnackbar(errorText(e)); return@launch // still away, so it can be retried
         }
-        saveAway(settings, null); away = false
+        saveAway(settings, null)
+        delay(4000) // read back, like goAway
         load()
+        away = false; awayBusy = false
         snackbar.showSnackbar(getString(Res.string.back_done))
     }
 
@@ -510,12 +520,12 @@ private fun RoomsTab(model: HomeModel, openRoom: (String) -> Unit) {
                         val span: (androidx.compose.foundation.lazy.grid.LazyGridItemSpanScope.() -> GridItemSpan) =
                             { GridItemSpan(maxLineSpan) }
                         model.error?.let { e -> item(span = span) { Text(e, color = MaterialTheme.colorScheme.error) } }
-                        if (model.away) item(span = span) { AwayOnCard(model.awayTemp, Modifier.springIn(0), model::comeBack) }
+                        if (model.away) item(span = span) { AwayOnCard(model.awayTemp, model.awayBusy, Modifier.springIn(0), model::comeBack) }
                         if (h.rooms.size > 1 && !model.away) item {
                             QuickCard(stringResource(Res.string.all_rooms), model.allTarget, { model.allTarget = it }, stringResource(Res.string.set_all), Modifier.springIn(0)) { model.setAll(model.allTarget) }
                         }
                         if (!model.away) item {
-                            QuickCard(stringResource(Res.string.away_title), model.awayTemp, { model.awayTemp = it }, stringResource(Res.string.away_go), Modifier.springIn(1), model::goAway)
+                            QuickCard(stringResource(Res.string.away_title), model.awayTemp, { model.awayTemp = it }, stringResource(Res.string.away_go), Modifier.springIn(1), model.awayBusy, model::goAway)
                         }
                         itemsIndexed(h.rooms, key = { _, r -> r.id }) { i, r ->
                             RoomCard(r, model.boosts.any { it.room == r.id }, { model.lastTarget(r.id) }, Modifier.springIn(i + 2), onOpen = { openRoom(r.id) }) { t -> model.setTarget(r, t) }
@@ -844,7 +854,10 @@ private fun RoomCard(room: Room, boosted: Boolean, lastTarget: () -> Double, mod
 
 /** One-row card: a stepper labelled [title] and an action button. */
 @Composable
-private fun QuickCard(title: String, t: Double, onChange: (Double) -> Unit, action: String, modifier: Modifier, onAction: () -> Unit) {
+private fun QuickCard(
+    title: String, t: Double, onChange: (Double) -> Unit, action: String, modifier: Modifier,
+    busy: Boolean = false, onAction: () -> Unit,
+) {
     Card(
         modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.extraLarge,
@@ -853,13 +866,15 @@ private fun QuickCard(title: String, t: Double, onChange: (Double) -> Unit, acti
         Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             TempStepper(t, onChange, buttonSize = 40.dp, label = title)
             Spacer(Modifier.weight(1f))
-            FilledTonalButton(onAction, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) { Text(action) }
+            FilledTonalButton(onAction, enabled = !busy, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) {
+                if (busy) LoadingIndicator(Modifier.size(24.dp), color = LocalContentColor.current) else Text(action)
+            }
         }
     }
 }
 
 @Composable
-private fun AwayOnCard(temp: Double, modifier: Modifier, onBack: () -> Unit) {
+private fun AwayOnCard(temp: Double, busy: Boolean, modifier: Modifier, onBack: () -> Unit) {
     Card(
         modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
@@ -873,7 +888,10 @@ private fun AwayOnCard(temp: Double, modifier: Modifier, onBack: () -> Unit) {
                 )
             }
             Spacer(Modifier.width(12.dp))
-            Button(onBack, shapes = ButtonDefaults.shapes()) { Text(stringResource(Res.string.away_back)) }
+            Button(onBack, enabled = !busy, shapes = ButtonDefaults.shapes()) {
+                if (busy) LoadingIndicator(Modifier.size(24.dp), color = LocalContentColor.current)
+                else Text(stringResource(Res.string.away_back))
+            }
         }
     }
 }
