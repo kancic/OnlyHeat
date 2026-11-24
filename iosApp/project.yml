@@ -1,0 +1,28 @@
+name: OnlyHeat
+options:
+  bundleIdPrefix: ancic.karim
+targets:
+  OnlyHeat:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources: [OnlyHeat]
+    info:
+      path: OnlyHeat/Info.plist
+      properties:
+        CADisableMinimumFrameDurationOnPhone: true
+        UILaunchScreen: {}
+        CFBundleDisplayName: OnlyHeat
+        NSLocalNetworkUsageDescription: OnlyHeat talks to your heating controller on the local network.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ancic.karim.onlyheat
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        FRAMEWORK_SEARCH_PATHS: $(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)
+        OTHER_LDFLAGS: [-framework, Shared]
+        SWIFT_VERSION: "5.0"
+    preBuildScripts:
+      - name: Build Shared (Kotlin)
+        script: |
+          cd "$SRCROOT/.."
+          ./gradlew :shared:embedAndSignAppleFrameworkForXcode

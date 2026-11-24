@@ -24,3 +24,6 @@ xcuserdata/
 *.xcuserstate
 DerivedData/
 /.idea/deploymentTargetSelector.xml
+iosApp/build/
+iosApp/OnlyHeat.xcodeproj/
+iosApp/OnlyHeat/Info.plist
