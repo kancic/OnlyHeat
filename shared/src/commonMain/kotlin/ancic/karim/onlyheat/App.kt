@@ -59,6 +59,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation3.runtime.NavEntry
@@ -70,6 +71,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
@@ -89,6 +92,7 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
+import kotlin.coroutines.coroutineContext
 
 internal val Heat = Color(0xFFFF5A00)
 internal val NightSky = Color(0xFF353D70)
@@ -125,10 +129,12 @@ private enum class Tab(val label: StringResource, val icon: ImageVector) {
 /**
  * [requestLocalNetwork] asks for local-network access where the platform requires it (Android 17+).
  * [dynamicScheme] supplies a wallpaper-based scheme (Android 12+); null falls back to the orange palette.
- * [notify] shows a system notification; used instead of a snackbar when the app is in the background.
+ * [notify] shows a system notification when a change is rejected after the user left the app; the notice stays too.
  * [wakeAt] runs [endExpiredBoosts] at that time (epoch ms) even if the app is closed; without it, boosts end
  * while the app is visible or when it next starts.
  * [backgroundAlerts] turns periodic alert checks on/off; null hides the Alerts setting.
+ * [notificationsAllowed] says whether alerts can be posted; while Alerts is on and they can't, a notice offers
+ * [openNotificationSettings]. Checked whenever the app resumes (the permission dialog and settings pause it).
  * [statusBarOnDark] switches the status bar icons to light while a screen draws something dark behind them.
  * [hasLocalNetwork] reports local-network access for AC discovery, or null if the platform can't tell.
  */
@@ -138,6 +144,8 @@ fun App(
     notify: (suspend (String) -> Unit)? = null,
     wakeAt: ((Long) -> Unit)? = null,
     backgroundAlerts: ((Boolean) -> Unit)? = null,
+    notificationsAllowed: () -> Boolean = { true },
+    openNotificationSettings: () -> Unit = {},
     dynamicScheme: (@Composable (dark: Boolean) -> ColorScheme?)? = null,
     statusBarOnDark: (Boolean) -> Unit = {},
     scheduleTipRequests: Flow<Unit> = emptyFlow(),
@@ -154,7 +162,7 @@ fun App(
                 requestLocalNetwork,
                 statusBarOnDark
             ) { pairing -> savePairing(settings, pairing); key = pairing.key }
-            else Main(api, k, requestLocalNetwork, hasLocalNetwork, notify, wakeAt, backgroundAlerts, scheduleTipRequests) {
+            else Main(api, k, requestLocalNetwork, hasLocalNetwork, notify, wakeAt, backgroundAlerts, notificationsAllowed, openNotificationSettings, scheduleTipRequests) {
                 if (clearSession(settings, k)) key = null
             }
         }
@@ -181,6 +189,9 @@ internal class HomeModel(
     var visible: () -> Boolean = { true }
     var notify: (suspend (String) -> Unit)? = null
     var wakeAt: ((Long) -> Unit)? = null
+    var notificationsAllowed by mutableStateOf(true) // re-checked on resume
+    var openNotificationSettings: () -> Unit = {}
+    val alertsOn get() = alertsEnabled(settings) // read on every composition: the switch is on another tab
     var onLoggedOut: () -> Unit = {}
     var away by mutableStateOf(awaySaved(settings) != null)
     var awayBusy by mutableStateOf(false) // Away / I'm back writing; the cards switch once it's done
@@ -199,6 +210,9 @@ internal class HomeModel(
     private var weatherAt: TimeMark? = null
     val days = mutableStateOf<List<DaySummary>?>(null) // History tab, kept across navigation
     private val pending = mutableMapOf<String, Job>() // debounced writes per room id
+    private var allRevision = 0
+    private val session = noticeSession(settings)
+    private fun sessionActive() = savedAuthKey(settings) == key && noticeSession(settings) == session
     /** The background check's state, for the window and not-warming notices; null when alerts are off or the
      *  last check is older than two of its runs (the phone may have kept the worker from running). */
     var watched by mutableStateOf<WatchState?>(null)
@@ -211,34 +225,60 @@ internal class HomeModel(
     var closed by mutableStateOf(decodeSet(settings.getString("notices.closed", "")))
         private set
 
-    fun close(key: String) = saveClosed(closed + key)
+    /** Rejected or failed temperature changes per room id (Notices.kt); the widget adds them too. */
+    var writeNotices by mutableStateOf(loadWriteNotices(settings))
+        private set
+    private fun writeNotice(roomId: String, text: String?) {
+        if (!sessionActive()) return
+        saveWriteNotice(settings, roomId, text)
+        writeNotices = loadWriteNotices(settings)
+    }
+
+    var operationNotices by mutableStateOf(loadOperationNotices(settings))
+        private set
+
+    private fun operationNotice(notice: OperationNotice, text: String?) {
+        if (!sessionActive()) return
+        saveOperationNotice(settings, notice, text)
+        operationNotices = loadOperationNotices(settings)
+    }
+
+    fun close(key: String) = when {
+        key.startsWith("write-") -> writeNotice(key.removePrefix("write-"), null)
+        key.startsWith("operation-") -> operationNotice(OperationNotice.valueOf(key.removePrefix("operation-")), null)
+        else -> saveClosed(closed + key)
+    }
     fun forgetClosed(active: Set<String>) = (closed intersect active).let { if (it != closed) saveClosed(it) }
     private fun saveClosed(keys: Set<String>) {
         closed = keys
         settings.putString("notices.closed", keys.joinToString(","))
     }
 
-    suspend fun load() {
+    suspend fun load(readBackRoom: String? = null): Home? {
+        if (!sessionActive()) return null
         // Also on failure: a phone offline for hours mustn't keep showing an old window warning.
         watched = if (alertsEnabled(settings)) loadWatch(settings).takeIf { nowSeconds() - it.lastAt <= WINDOW_MAX_GAP } else null
         warmAbove = warmSetting(settings)
-        attempt { api.home(key) }
-            .onSuccess { fresh ->
-                if (savedAuthKey(settings) != key) return
-                // Don't let a refresh overwrite a value the user is still adjusting.
-                val local = home?.rooms?.associateBy { it.id }.orEmpty()
-                home = fresh.copy(rooms = fresh.rooms.map { r ->
-                    if (pending[r.id]?.isActive == true) r.copy(target = local[r.id]?.target) else r
-                })
-                error = null
-                // Away and boost temperatures are temporary: don't make them what the switch restores.
-                if (!away && !awayBusy) fresh.rooms.filter { r -> boosts.none { it.room == r.id } }
-                    .forEach { r -> r.target?.let { rememberTarget(r.id, it) } }
-            }
-            .onFailure {
-                if (it is AuthExpired) onLoggedOut()
-                error = errorText(it)
-            }
+        writeNotices = loadWriteNotices(settings) // the widget may have added some
+        operationNotices = loadOperationNotices(settings)
+        val result = attempt { api.home(key) }
+        coroutineContext.ensureActive()
+        if (!sessionActive()) return null
+        val fresh = result.getOrElse {
+            if (it is AuthExpired) onLoggedOut()
+            error = errorText(it)
+            return null
+        }
+        // Don't let a refresh overwrite a value the user is still adjusting.
+        val local = home?.rooms?.associateBy { it.id }.orEmpty()
+        home = fresh.copy(rooms = fresh.rooms.map { r ->
+            if (r.id != readBackRoom && pending[r.id]?.isActive == true) r.copy(target = local[r.id]?.target) else r
+        })
+        error = null
+        // Away and boost temperatures are temporary: don't make them what the switch restores.
+        if (!away && !awayBusy) fresh.rooms.filter { r -> boosts.none { it.room == r.id } }
+            .forEach { r -> r.target?.let { rememberTarget(r.id, it) } }
+        return fresh
     }
 
     suspend fun refreshOnResume() {
@@ -295,12 +335,20 @@ internal class HomeModel(
         weatherAt = weatherClock.markNow()
     }
 
-    /** Lowers every room that is on to [awayTemp] and remembers what each one had. */
-    fun goAway(updateAc: suspend () -> Unit) = scope.launch {
-        val h = home ?: return@launch
-        if (awayBusy) return@launch
+    fun retryAway(updateAc: suspend () -> Set<String>) =
+        goAway(settings.getDouble("away.temp", awayTemp), updateAc)
+
+    /** Lowers every room that is on to [target] and remembers what each one had. */
+    fun goAway(target: Double = awayTemp, updateAc: suspend () -> Set<String>) = scope.launch {
+        if (awayBusy || !sessionActive()) return@launch
         awayBusy = true
-        settings.putDouble("away.temp", awayTemp)
+        val h = home ?: load()
+        if (h == null) {
+            awayBusy = false
+            return@launch
+        }
+        operationNotice(OperationNotice.AwayFailed, null)
+        settings.putDouble("away.temp", target)
         val boosted = boosts.associateBy { it.room }
         val saved = h.rooms.associate {
             it.id to (boosted[it.id]?.restore ?: it.target)
@@ -310,7 +358,7 @@ internal class HomeModel(
         val heated = h.rooms.filter { saved[it.id] != null } // rooms that are off stay off
         val lowered = mutableListOf<Room>()
         try {
-            heated.forEach { api.setTemp(key, it.id, awayTemp); lowered += it }
+            heated.forEach { api.setTemp(key, it.id, target); lowered += it }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             // Don't leave it half away: undo what was lowered, so Away shows again and can simply be retried.
@@ -323,41 +371,68 @@ internal class HomeModel(
                     )
                 }
             } // else the error below covers it
-            if (savedAuthKey(settings) == key) saveAway(settings, null)
-            load(); awayBusy = false
-            snackbar.showSnackbar(errorText(e)); return@launch
+            if (sessionActive()) saveAway(settings, null)
+            operationNotice(OperationNotice.AwayFailed, errorText(e))
+            load()
+            awayBusy = false
+            return@launch
         }
-        updateAc()
+        operationNotice(OperationNotice.AcOn, null)
+        reportAwayAc(updateAc(), h, goingAway = true)
         delay(4000) // read back, like single rooms
-        load()
+        val fresh = load()
+        if (!sessionActive()) return@launch
+        val kept = fresh?.rooms.orEmpty()
+            .filter { r -> heated.any { it.id == r.id } && r.target != target }
+        if (kept.isNotEmpty()) {
+            operationNotice(OperationNotice.AwayKept, getString(Res.string.away_kept, kept.joinToString { it.name }))
+        }
+        awayTemp = target
         away = true; awayBusy = false
-        val kept = home?.rooms.orEmpty()
-            .filter { r -> heated.any { it.id == r.id } && r.target != awayTemp }
-        snackbar.showSnackbar(
-            if (kept.isEmpty()) getString(Res.string.away_set, fmt1(awayTemp))
-            else getString(Res.string.away_kept, kept.joinToString { it.name }),
-            duration = SnackbarDuration.Long,
-        )
+        if (fresh != null && kept.isEmpty()) snackbar.showSnackbar(getString(Res.string.away_set, fmt1(target)), duration = SnackbarDuration.Long)
     }
 
     /** "I'm back": puts every room back to what it had before [goAway]. */
-    fun comeBack(updateAc: suspend () -> Unit) = scope.launch {
+    fun comeBack(updateAc: suspend () -> Set<String>) = scope.launch {
         val saved = awaySaved(settings) ?: return@launch
-        if (awayBusy) return@launch
+        if (awayBusy || !sessionActive()) return@launch
         awayBusy = true
+        operationNotice(OperationNotice.BackFailed, null)
         try {
             saved.forEach { (id, t) -> if (t != null) api.setTemp(key, id, t) }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            load(); awayBusy = false
-            snackbar.showSnackbar(errorText(e)); return@launch // still away, so it can be retried
+            operationNotice(OperationNotice.BackFailed, errorText(e))
+            load()
+            awayBusy = false
+            return@launch
         }
-        updateAc()
-        if (savedAuthKey(settings) == key) saveAway(settings, null)
+        reportAwayAc(updateAc(), home, goingAway = false)
         delay(4000) // read back, like goAway
-        load()
+        val fresh = load()
+        if (!sessionActive()) return@launch
+        val kept = fresh?.rooms.orEmpty().filter { r -> saved[r.id]?.let { it != r.target } == true }
+        if (fresh == null || kept.isNotEmpty()) {
+            val text = if (kept.isNotEmpty()) getString(Res.string.back_kept, kept.joinToString { it.name })
+                else error ?: getString(Res.string.failed)
+            operationNotice(OperationNotice.BackFailed, text)
+            awayBusy = false
+            return@launch
+        }
+        saveAway(settings, null)
+        operationNotice(OperationNotice.AwayKept, null)
+        operationNotice(OperationNotice.AcOff, null)
         away = false; awayBusy = false
         snackbar.showSnackbar(getString(Res.string.back_done))
+    }
+
+    private suspend fun reportAwayAc(failed: Set<String>, home: Home?, goingAway: Boolean) {
+        if (failed.isEmpty()) return
+        val names = home?.rooms.orEmpty().associate { it.id to it.name }
+        val rooms = failed.joinToString { names[it] ?: it }
+        val notice = if (goingAway) OperationNotice.AcOff else OperationNotice.AcOn
+        val message = if (goingAway) Res.string.away_ac_off_failed else Res.string.back_ac_on_failed
+        operationNotice(notice, getString(message, rooms))
     }
 
     /** +2° on top of the room's own target for [minutes], then back. A second boost just extends it. */
@@ -396,41 +471,60 @@ internal class HomeModel(
         scope.launch { delay(2.seconds); load() }
     }
 
-    fun setTarget(room: Room, target: Double?) {
+    fun setTarget(room: Room, target: Double?): Job? {
+        if (!sessionActive()) return null
         home =
             home?.let { h -> h.copy(rooms = h.rooms.map { if (it.id == room.id) it.copy(target = target) else it }) }
         if (!away && boosts.none { it.room == room.id }) target?.let { rememberTarget(room.id, it) }
+        writeNotice(room.id, null) // a new try replaces what the last one left
         pending[room.id]?.cancel()
-        pending[room.id] = scope.launch {
-            delay(700) // wait for the user to stop tapping
+        val write = scope.launch {
+            val job = coroutineContext.job
             try {
-                api.setTemp(key, room.id, target)
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                pending.remove(room.id); load()
-                snackbar.showSnackbar("${room.name}: ${errorText(e)}")
-                return@launch
-            }
-            // The server says OK even when the controller ignores the value, so read it back.
-            delay(4000)
-            pending.remove(room.id)
-            load()
-            val kept = home?.rooms?.find { it.id == room.id } ?: return@launch
-            if (kept.target != target) {
-                val text = keptMessage(kept)
-                val n = notify
-                if (n != null && !visible()) n(text) // user already left the app
-                else snackbar.showSnackbar(text, duration = SnackbarDuration.Long)
+                delay(700) // wait for the user to stop tapping
+                if (!sessionActive()) return@launch
+                val result = attempt { api.setTemp(key, room.id, target) }
+                // The server says OK even when the controller ignores the value, so read it back.
+                if (result.isSuccess) delay(4000)
+                val kept = load(readBackRoom = room.id)?.rooms?.find { it.id == room.id }
+                val failure = result.exceptionOrNull()
+                val text = when {
+                    failure != null -> "${room.name}: ${errorText(failure)}"
+                    kept != null && kept.target != target -> keptMessage(kept)
+                    else -> return@launch
+                }
+                if (pending[room.id] == job && sessionActive()) {
+                    writeNotice(room.id, text)
+                    if (!visible()) notify?.invoke(text)
+                }
+            } finally {
+                if (pending[room.id] == job) pending.remove(room.id)
             }
         }
+        pending[room.id] = write
+        return write
     }
 
     fun setAll(t: Double) = scope.launch {
+        if (!sessionActive()) return@launch
+        val revision = ++allRevision
+        val previousWarnings = loadWriteNotices(settings)
+        operationNotice(OperationNotice.AllFailed, null)
         settings.putDouble("allTarget", t)
-        attempt { api.setAll(key, t) }
-            .onSuccess { snackbar.showSnackbar(getString(Res.string.all_set, fmt1(t))) }
-            .onFailure { snackbar.showSnackbar(errorText(it)) }
-        load()
+        val result = attempt { api.setAll(key, t) }
+        val failure = result.exceptionOrNull()
+        if (failure != null) {
+            val text = errorText(failure)
+            if (revision == allRevision) operationNotice(OperationNotice.AllFailed, text)
+        } else delay(4000) // give the controller time to apply the bulk set before clearing warnings
+        val fresh = load()
+        if (!sessionActive() || revision != allRevision || failure != null) return@launch
+        val warnings = loadWriteNotices(settings)
+        fresh?.rooms.orEmpty().filter { r ->
+            r.target == t && r.id !in pending && r.id in previousWarnings && previousWarnings[r.id] == warnings[r.id]
+        }.forEach { saveWriteNotice(settings, it.id, null) }
+        writeNotices = loadWriteNotices(settings)
+        snackbar.showSnackbar(getString(Res.string.all_set, fmt1(t)))
     }
 }
 
@@ -443,15 +537,20 @@ private fun Main(
     notify: (suspend (String) -> Unit)?,
     wakeAt: ((Long) -> Unit)?,
     backgroundAlerts: ((Boolean) -> Unit)?,
+    notificationsAllowed: () -> Boolean,
+    openNotificationSettings: () -> Unit,
     scheduleTipRequests: Flow<Unit>,
     onLogout: () -> Unit,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val model = koinViewModel<HomeModel>(key = "home:$key") { parametersOf(key) }
+    val session = noticeSession(koinInject<Settings>())
+    val model = koinViewModel<HomeModel>(key = "home:$session:$key") { parametersOf(key) }
     model.visible = { lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
     model.notify = notify
     model.wakeAt = wakeAt
-    val acs = koinViewModel<AcModel>(key = "ac:$key") { parametersOf(key) }
+    model.openNotificationSettings = openNotificationSettings
+    LifecycleResumeEffect(model) { model.notificationsAllowed = notificationsAllowed(); onPauseOrDispose {} }
+    val acs = koinViewModel<AcModel>(key = "ac:$session:$key") { parametersOf(key) }
     val logout = { acs.endSession(); onLogout() }
     model.onLoggedOut = logout
     acs.snackbar = model.snackbar
@@ -788,8 +887,7 @@ private fun RoomsTab(
             },
         ) {
             when (val h = model.home) {
-                null if model.error != null -> Message(model.error!!) { model.refresh() }
-                null -> Box(
+                null if notices.isEmpty() -> Box(
                     Modifier.fillMaxSize(),
                     Alignment.Center
                 ) { LoadingIndicator(Modifier.size(64.dp)) }
@@ -807,14 +905,14 @@ private fun RoomsTab(
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         val span = StaggeredGridItemSpan.FullLine
-                        if (model.away) item(span = span) {
+                        if (h != null && model.away) item(span = span) {
                             AwayOnCard(
                                 model.awayTemp,
                                 model.awayBusy,
                                 Modifier.springIn(0),
                             ) { model.comeBack { acs.setAway(false) } }
                         }
-                        if (h.rooms.size > 1 && !model.away) item {
+                        if (h != null && h.rooms.size > 1 && !model.away) item {
                             QuickCard(
                                 stringResource(Res.string.all_rooms),
                                 model.allTarget,
@@ -823,7 +921,7 @@ private fun RoomsTab(
                                 Modifier.springIn(0)
                             ) { model.setAll(model.allTarget) }
                         }
-                        if (!model.away) item {
+                        if (h != null && !model.away) item {
                             QuickCard(
                                 stringResource(Res.string.away_title),
                                 model.awayTemp,
@@ -839,7 +937,7 @@ private fun RoomsTab(
                                 NoticeCard(n, Modifier.springIn(2), if (n.closable) ({ model.close(n.key) }) else null)
                             }
                         }
-                        if (discoverAc != null && h.rooms.isNotEmpty() && acs.found.isEmpty() && "ac-discovery" in model.closed) {
+                        if (discoverAc != null && h != null && h.rooms.isNotEmpty() && acs.found.isEmpty() && "ac-discovery" in model.closed) {
                             item(span = span) {
                                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                                     TextButton(discoverAc, enabled = !acs.discovering && !acs.binding) {
@@ -848,7 +946,7 @@ private fun RoomsTab(
                                 }
                             }
                         }
-                        itemsIndexed(h.rooms, key = { _, r -> r.id }) { i, r ->
+                        itemsIndexed(h?.rooms.orEmpty(), key = { _, r -> r.id }) { i, r ->
                             RoomCard(
                                 r,
                                 model.boosts.any { it.room == r.id },
@@ -860,7 +958,7 @@ private fun RoomsTab(
                                 onAcMore = { acSheet = r.id },
                                 onOpen = { openRoom(r.id) }) { t -> model.setTarget(r, t) }
                         }
-                        if (h.rooms.isEmpty()) item(span = span) { Text(stringResource(Res.string.no_rooms)) }
+                        if (h != null && h.rooms.isEmpty()) item(span = span) { Text(stringResource(Res.string.no_rooms)) }
                     }
                 }
             }

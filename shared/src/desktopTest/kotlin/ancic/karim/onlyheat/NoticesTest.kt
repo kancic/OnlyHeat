@@ -2,6 +2,7 @@ package ancic.karim.onlyheat
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class NoticesTest {
     private fun room(id: String, current: Double?, target: Double?, heating: Boolean = false, cooling: Boolean = false) =
@@ -13,6 +14,27 @@ class NoticesTest {
     ) = roomIssues(rooms, watched, outside, AC_ABOVE, shown) { acs[it] }.map { it.key }
 
     private val cooling = AcState(power = true, mode = AcMode.Cool, target = 22, fan = AcFan.Auto)
+
+    @Test fun writeNoticesArePerRoomAndClear() {
+        val settings = com.russhwolf.settings.PreferencesSettings(java.util.prefs.Preferences.userRoot().node("noticesTest"))
+        settings.clear()
+        savePairing(settings, Pairing("first", null))
+        saveWriteNotice(settings, "a", "kept 20°")
+        saveWriteNotice(settings, "b", "failed")
+        settings.putString("other", "x")
+        assertEquals(mapOf("a" to "kept 20°", "b" to "failed"), loadWriteNotices(settings))
+        saveWriteNotice(settings, "a", null)
+        assertEquals(mapOf("b" to "failed"), loadWriteNotices(settings))
+        saveOperationNotice(settings, OperationNotice.AwayFailed, "failed")
+        val oldSession = noticeSession(settings)
+        assertTrue(clearSession(settings, "first"))
+        savePairing(settings, Pairing("second", null))
+        assertTrue(noticeSession(settings) != oldSession)
+        assertTrue(loadWriteNotices(settings).isEmpty())
+        assertTrue(loadOperationNotices(settings).isEmpty())
+        assertEquals("x", settings.getStringOrNull("other"))
+        settings.clear()
+    }
 
     @Test fun windowAndNotWarmingNeedTheBackgroundCheckAndStillBeingCold() {
         val watched = WatchState(window = setOf("a", "b"), stuck = setOf("a", "c"))

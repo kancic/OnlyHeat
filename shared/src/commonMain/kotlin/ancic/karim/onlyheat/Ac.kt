@@ -341,15 +341,15 @@ internal class AcModel(private val settings: Settings, private val key: String) 
         write: suspend (LinkedAc, AcChange, () -> Boolean) -> AcState? = { unit, change, current ->
             unit.apply(change, current)
         },
-    ) {
-        if (savedAuthKey(settings) != key) return
+    ): Set<String> {
+        if (savedAuthKey(settings) != key) return emptySet()
         settings.remove("away.ac") // old snapshots stored room IDs, which cannot identify the original AC
         val saved = decodeSet(settings.getString(AC_AWAY, "")).toMutableSet()
         if (away) {
             saved.clear()
             settings.remove(AC_AWAY)
         }
-        var failed = false
+        val failed = mutableSetOf<String>()
         coroutineScope {
             for ((room, ac) in settings.linkedAcs(key)) {
                 if (!away && ac.id !in saved) continue
@@ -377,7 +377,7 @@ internal class AcModel(private val settings: Settings, private val key: String) 
                         }.onFailure {
                             states[room] = (it as? AcUnreachable)?.actual
                             log("AC change failed", it)
-                            failed = true
+                            failed += room
                         }
                     } finally {
                         awayRooms -= room
@@ -388,7 +388,7 @@ internal class AcModel(private val settings: Settings, private val key: String) 
         // shortcut: return tries once, revisit if the UI offers an explicit retry for unreachable units.
         if (!away && savedAuthKey(settings) == key) settings.remove(AC_AWAY)
         linked = settings.linkedAcs(key)
-        if (failed) viewModelScope.launch { snackbar?.showSnackbar(getString(Res.string.ac_failed)) }
+        return failed
     }
 
     fun set(roomId: String, change: AcChange) {

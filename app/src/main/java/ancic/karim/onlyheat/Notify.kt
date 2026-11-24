@@ -11,6 +11,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 
+internal const val ALERTS_CHANNEL = "alerts"
+
 /** Posts a notification that opens the app; silently does nothing without the notification permission.
  *  [acLinks]: the pairings a "Turn on AC" button cools (the AC tip). */
 fun Context.notifyHeat(text: String, alert: Boolean = false, acLinks: List<String> = emptyList()) {
@@ -19,7 +21,7 @@ fun Context.notifyHeat(text: String, alert: Boolean = false, acLinks: List<Strin
     ) return
     val nm = getSystemService(NotificationManager::class.java)
     // Two channels so alerts (offline, cold, window, not warming, too hot, AC) can stay loud while setpoint notes are muted, or vice versa.
-    val channel = if (alert) "alerts" else "setpoints"
+    val channel = if (alert) ALERTS_CHANNEL else "setpoints"
     nm.createNotificationChannel(
         if (alert) NotificationChannel(channel, getString(R.string.channel_alerts), NotificationManager.IMPORTANCE_HIGH)
         else NotificationChannel(channel, getString(R.string.channel_setpoints), NotificationManager.IMPORTANCE_DEFAULT)

@@ -59,6 +59,7 @@ internal fun fingerprint(value: String) = Base64.UrlSafe.encode(sha256(value.enc
 internal fun controllerSerialSetting(key: String) = "controllerSerial.${fingerprint(key)}"
 
 internal fun savePairing(s: Settings, pairing: Pairing) {
+    startNoticeSession(s)
     val setting = controllerSerialSetting(pairing.key)
     if (pairing.serial == null) s.remove(setting) else s.putString(setting, pairing.serial)
     s.putString("authKey", pairing.key)

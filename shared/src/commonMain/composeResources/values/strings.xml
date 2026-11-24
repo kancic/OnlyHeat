@@ -143,7 +143,13 @@
     <string name="away_on_desc">Rooms are at %1$s°. Their own temperatures are saved.</string>
     <string name="away_back">I’m back</string>
     <string name="away_set">Away: rooms set to %1$s°</string>
-    <string name="away_kept">Away is on, but these follow their schedule and kept their temperature: %1$s</string>
+    <string name="away_kept">Away is on, but these rooms kept their temperature: %1$s</string>
+    <string name="away_failed">Away failed</string>
+    <string name="back_failed">Coming back failed</string>
+    <string name="back_kept">These rooms didn’t return to their previous temperature: %1$s</string>
+    <string name="away_ac_off_failed">Couldn’t turn off AC in %1$s.</string>
+    <string name="back_ac_on_failed">Couldn’t turn on AC in %1$s.</string>
+    <string name="all_failed">Couldn’t set all rooms</string>
     <string name="back_done">Welcome back. Temperatures restored.</string>
     <string name="boost">Boost</string>
     <string name="boost_title">Boost</string>
@@ -231,6 +237,8 @@
     <string name="ac_header_on">AC on</string>
     <string name="floor_heating">Floor heating</string>
     <string name="notice_window">%1$s is cooling down fast while it should heat. Is a window open?</string>
+    <string name="notice_notifications_off">Alerts are on, but notifications are off for OnlyHeat, so you won\'t see them.</string>
+    <string name="notice_notifications_allow">Turn on</string>
     <string name="notice_open_room">Open room</string>
     <string name="ac_turn_on">Turn on AC</string>
     <string name="close">Close</string>

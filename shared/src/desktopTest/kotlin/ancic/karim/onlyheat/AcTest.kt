@@ -5,10 +5,12 @@ import com.russhwolf.settings.PreferencesSettings
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -19,6 +21,9 @@ import kotlinx.serialization.json.jsonObject
 import okhttp3.Protocol
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.UUID
 import java.util.prefs.Preferences
 import kotlin.test.Test
@@ -28,6 +33,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TestTimeSource
 
 class AcTest {
@@ -230,6 +236,68 @@ class AcTest {
         val ac = AcView(AcState(true, AcMode.Cool, 21, AcFan.Auto), loaded = true)
         assertTrue(RoomActivity(room, ac).acCooling)
         assertFalse(RoomActivity(room, ac).floor)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun newerRoomEditWinsDuringReadbackAndBulkSetClearsOnlyConfirmedWarnings() = runTest(timeout = 15.seconds) {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val reading = CompletableDeferred<Unit>()
+        val release = CountDownLatch(1)
+        val reads = AtomicInteger()
+        val client = HttpClient(OkHttp) {
+            engine {
+                config {
+                    addInterceptor { chain ->
+                        val request = chain.request()
+                        val body = if (request.url.pathSegments.last() == "getRooms") {
+                            val read = reads.incrementAndGet()
+                            if (read == 1) {
+                                reading.complete(Unit)
+                                check(release.await(10, TimeUnit.SECONDS))
+                            }
+                            val target = if (read == 1) 20 else 22
+                            """{"status":"OK","globalDeviceName":"read-$read","rooms":[{"id":"a","title":"Bedroom","targetTemp":"$target"},{"id":"b","title":"Kitchen","targetTemp":"19"}]}"""
+                        } else """{"status":"OK"}"""
+                        Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
+                            .code(200).message("OK").body(body.toResponseBody()).build()
+                    }
+                }
+            }
+        }
+        try {
+            withSettings { settings ->
+                val history = object : ReadingDao {
+                    override suspend fun insert(readings: List<Reading>) = error("unexpected history write")
+                    override suspend fun averaged(roomId: String, from: Long, bucket: Long) = error("unexpected history read")
+                    override suspend fun oldest() = error("unexpected history read")
+                }
+                val model = HomeModel(HeatApi(client), history, "first", settings)
+                val room = Room("a", "Bedroom", null, 20.0, null, heating = false, smart = false, schedule = false)
+                val first = checkNotNull(model.setTarget(room, 21.0))
+                reading.await()
+                val second = checkNotNull(model.setTarget(room, 22.0))
+                release.countDown()
+                first.join()
+                second.join()
+                assertEquals(22.0, model.home?.rooms?.first()?.target)
+                assertTrue(model.writeNotices.isEmpty())
+
+                saveWriteNotice(settings, "a", "Bedroom warning")
+                saveWriteNotice(settings, "b", "Kitchen warning")
+                val bulk = model.setAll(22.0)
+                try {
+                    while (model.snackbar.currentSnackbarData == null) withContext(Dispatchers.Default) { delay(10) }
+                    assertEquals(mapOf("b" to "Kitchen warning"), loadWriteNotices(settings))
+                } finally {
+                    bulk.cancel()
+                }
+            }
+        } finally {
+            release.countDown()
+            client.close()
+            Dispatchers.resetMain()
+        }
     }
 
     @Test

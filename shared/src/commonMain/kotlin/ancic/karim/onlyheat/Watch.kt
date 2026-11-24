@@ -74,6 +74,7 @@ internal fun clearSession(s: Settings, key: String): Boolean {
     s.remove(controllerSerialSetting(key))
     s.keys.filter { k -> listOf("away.", "boost.", "watch.", "lastTarget.").any(k::startsWith) }.forEach(s::remove)
     s.remove("authKey")
+    clearSessionNotices(s)
     s.clearAcLinks()
     return true
 }

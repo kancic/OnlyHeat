@@ -52,6 +52,8 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.koin.mp.KoinPlatform
 
 // Glance builds receivers and callbacks itself, so they look up the shared instances.
@@ -68,6 +70,7 @@ private const val PENDING_TTL_MS = 90_000L
 private fun Preferences.pendingTarget(roomId: String) = this[pendingKey(roomId)]
     ?.takeIf { System.currentTimeMillis() - (this[pendingAtKey(roomId)] ?: 0) < PENDING_TTL_MS }
 private val RoomId = ActionParameters.Key<String>("roomId")
+private val RoomName = ActionParameters.Key<String>("roomName")
 private val Target = ActionParameters.Key<Double>("target")
 private val ScheduleTipRequest = ActionParameters.Key<Boolean>(SCHEDULE_TIP_EXTRA)
 
@@ -211,13 +214,13 @@ private fun RoomCard(room: Room, target: Double?, modifier: GlanceModifier) {
             style = TextStyle(color = fg, fontSize = 16.sp, textAlign = TextAlign.Center),
         )
         else Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            StepButton("−", room.id, (target - STEP).coerceAtLeast(MIN_T), enabled = !room.schedule)
+            StepButton("−", room, (target - STEP).coerceAtLeast(MIN_T), enabled = !room.schedule)
             Text(
                 "${fmt1(target)}°", GlanceModifier.defaultWeight(),
                 style = TextStyle(color = fg, fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
                 maxLines = 1,
             )
-            StepButton("+", room.id, (target + STEP).coerceAtMost(MAX_T), enabled = !room.schedule)
+            StepButton("+", room, (target + STEP).coerceAtMost(MAX_T), enabled = !room.schedule)
         }
     }
 }
@@ -233,12 +236,12 @@ private fun More(context: Context, count: Int, modifier: GlanceModifier) {
 }
 
 @Composable
-private fun StepButton(label: String, roomId: String, target: Double, enabled: Boolean) {
+private fun StepButton(label: String, room: Room, target: Double, enabled: Boolean) {
     val colors = GlanceTheme.colors
     val button = GlanceModifier.width(40.dp).height(28.dp).cornerRadius(14.dp)
     val modifier = if (enabled) {
         button.background(colors.surface)
-            .clickable(actionRunCallback<StepTarget>(actionParametersOf(RoomId to roomId, Target to target)))
+            .clickable(actionRunCallback<StepTarget>(actionParametersOf(RoomId to room.id, RoomName to room.name, Target to target)))
     } else {
         button.background(colors.surfaceVariant)
             .clickable(actionStartActivity<MainActivity>(actionParametersOf(ScheduleTipRequest to true)))
@@ -260,28 +263,52 @@ private fun StepButton(label: String, roomId: String, target: Double, enabled: B
 
 /** Same flow as the app: show at once, debounce taps, write, then read back and tell the user if it was not kept. */
 class StepTarget : ActionCallback {
-    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        val roomId = parameters[RoomId] ?: return
-        val target = parameters[Target] ?: return
-        val key = savedAuthKey(KoinPlatform.getKoin().get()) ?: return
-        val pending = pendingKey(roomId)
-        suspend fun stillOurs() = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)[pending] == target
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) =
+        withContext(Dispatchers.Main.immediate) {
+            val roomId = parameters[RoomId] ?: return@withContext
+            val target = parameters[Target] ?: return@withContext
+            val settings = KoinPlatform.getKoin().get<com.russhwolf.settings.Settings>()
+            val key = savedAuthKey(settings) ?: return@withContext
+            val session = noticeSession(settings)
+            val pending = pendingKey(roomId)
+            val pendingAt = pendingAtKey(roomId)
+            var revision = 0L
+            updateAppWidgetState(context, glanceId) {
+                revision = maxOf(System.currentTimeMillis(), (it[pendingAt] ?: 0) + 1)
+                it[pending] = target
+                it[pendingAt] = revision
+            }
+            suspend fun stillOurs() =
+                getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)[pendingAt] == revision &&
+                    savedAuthKey(settings) == key && noticeSession(settings) == session
 
-        updateAppWidgetState(context, glanceId) { it[pending] = target; it[pendingAtKey(roomId)] = System.currentTimeMillis() }
-        HeatWidget().update(context, glanceId)
-        delay(700) // wait for the user to stop tapping; a newer tap takes over
-        if (!stillOurs()) return
-        try {
-            api.setTemp(key, roomId, target)
-            delay(4_000) // the server says OK even when the controller ignores the value
-            if (!stillOurs()) return
-            val kept = api.home(key).rooms.find { it.id == roomId }
-            if (kept != null && kept.target != target) context.notifyHeat(keptMessage(kept))
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            android.util.Log.w("OnlyHeat", "widget write failed", e)
-            context.notifyHeat(context.getString(R.string.widget_write_failed))
+            HeatWidget().update(context, glanceId)
+            delay(700) // wait for the user to stop tapping; a newer tap takes over
+            if (!stillOurs()) return@withContext
+            saveWriteNotice(settings, roomId, null)
+            // Also a notice in the app, which waits there when notifications aren't allowed.
+            suspend fun report(text: String) {
+                if (!stillOurs()) return
+                saveWriteNotice(settings, roomId, text)
+                context.notifyHeat(text)
+            }
+            try {
+                api.setTemp(key, roomId, target)
+                delay(4_000) // the server says OK even when the controller ignores the value
+                if (!stillOurs()) return@withContext
+                val kept = api.home(key).rooms.find { it.id == roomId }
+                if (kept != null && kept.target != target) report(keptMessage(kept))
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                android.util.Log.w("OnlyHeat", "widget write failed", e)
+                report(listOfNotNull(parameters[RoomName], context.getString(R.string.widget_write_failed)).joinToString(": "))
+            }
+            if (!stillOurs()) return@withContext
+            bump(context, glanceId) {
+                if (it[pendingAt] == revision) {
+                    it.remove(pending)
+                    it.remove(pendingAt)
+                }
+            }
         }
-        if (stillOurs()) bump(context, glanceId) { it.remove(pending); it.remove(pendingAtKey(roomId)) }
-    }
 }

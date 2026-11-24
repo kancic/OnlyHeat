@@ -143,7 +143,13 @@
     <string name="away_on_desc">Sobe su na %1$s°. Njihove temperature su spremljene.</string>
     <string name="away_back">Natrag sam</string>
     <string name="away_set">Odsutnost: sobe postavljene na %1$s°</string>
-    <string name="away_kept">Odsutnost je uključena, ali ove sobe prate raspored i zadržale su temperaturu: %1$s</string>
+    <string name="away_kept">Odsutnost je uključena, ali ove su sobe zadržale temperaturu: %1$s</string>
+    <string name="away_failed">Uključivanje odsutnosti nije uspjelo</string>
+    <string name="back_failed">Isključivanje odsutnosti nije uspjelo</string>
+    <string name="back_kept">Ove se sobe nisu vratile na prethodnu temperaturu: %1$s</string>
+    <string name="away_ac_off_failed">Klima se nije mogla isključiti u sobama: %1$s.</string>
+    <string name="back_ac_on_failed">Klima se nije mogla uključiti u sobama: %1$s.</string>
+    <string name="all_failed">Postavljanje temperature za sve sobe nije uspjelo</string>
     <string name="back_done">Dobrodošli natrag. Temperature su vraćene.</string>
     <string name="boost">Pojačano</string>
     <string name="boost_title">Pojačaj</string>
@@ -232,6 +238,8 @@
     <string name="ac_header_on">klima radi</string>
     <string name="floor_heating">Pod grije</string>
     <string name="notice_window">%1$s: temperatura brzo pada iako bi se trebalo grijati. Je li otvoren prozor?</string>
+    <string name="notice_notifications_off">Upozorenja su uključena, ali su obavijesti za OnlyHeat isključene pa ih nećete vidjeti.</string>
+    <string name="notice_notifications_allow">Uključi</string>
     <string name="notice_open_room">Otvori prostoriju</string>
     <string name="ac_turn_on">Uključi klimu</string>
     <string name="close">Zatvori</string>

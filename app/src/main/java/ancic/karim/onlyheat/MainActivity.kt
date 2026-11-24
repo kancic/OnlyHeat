@@ -1,10 +1,13 @@
 package ancic.karim.onlyheat
 
 import android.Manifest
+import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS
+import android.provider.Settings.EXTRA_APP_PACKAGE
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -46,19 +49,20 @@ class MainActivity : ComponentActivity() {
     private fun hasLocalNetwork() = Build.VERSION.SDK_INT < 37 ||
         checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") == PackageManager.PERMISSION_GRANTED
 
+    private fun notificationsAllowed(): Boolean {
+        val manager = getSystemService(NotificationManager::class.java)
+        return manager.areNotificationsEnabled() &&
+            manager.getNotificationChannel(ALERTS_CHANNEL)?.importance != NotificationManager.IMPORTANCE_NONE
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        // ponytail: leftover of the old one-time prompt; drop this line once everyone has updated.
+        getSharedPreferences(MainActivity::class.java.simpleName, MODE_PRIVATE).edit().remove("askedNotifications").apply()
         scheduleHistorySync()
         scheduleAlerts(alertsEnabled(get<Settings>()))
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) requestScheduleTip(intent)
-        // Notifications tell the user when the controller ignored a change made just before leaving the app
-        // or from the widget. Asked once; Settings is the place to change it later.
-        val prefs = getPreferences(MODE_PRIVATE)
-        if (Build.VERSION.SDK_INT >= 33 && !prefs.getBoolean("askedNotifications", false)) {
-            prefs.edit().putBoolean("askedNotifications", true).apply()
-            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
         setContent {
             App(
                 ::requestLocalNetwork,
@@ -66,10 +70,14 @@ class MainActivity : ComponentActivity() {
                 wakeAt = { wakeAt(it) },
                 backgroundAlerts = { on ->
                     scheduleAlerts(on)
-                    // Alerts are useless without notifications: ask again if they were declined at first launch.
                     if (on && Build.VERSION.SDK_INT >= 33 &&
                         checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
                     ) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                },
+                // Denied, revoked or no longer asked: the Rooms tab shows a notice that leads here.
+                notificationsAllowed = ::notificationsAllowed,
+                openNotificationSettings = {
+                    startActivity(Intent(ACTION_APP_NOTIFICATION_SETTINGS).putExtra(EXTRA_APP_PACKAGE, packageName))
                 },
                 dynamicScheme = { dark ->
                     if (Build.VERSION.SDK_INT < 31) null

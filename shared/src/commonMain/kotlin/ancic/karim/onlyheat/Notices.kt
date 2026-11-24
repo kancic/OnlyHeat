@@ -2,6 +2,7 @@ package ancic.karim.onlyheat
 
 import ancic.karim.onlyheat.res.*
 import androidx.compose.foundation.background
+import com.russhwolf.settings.Settings
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -11,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
+import kotlin.uuid.Uuid
 
 // The Rooms tab's notification area, between the Away card and the rooms: everything that needs attention
 // right now, most severe first. Built from the current state on every composition; only closed keys are stored.
@@ -29,9 +31,43 @@ internal class Notice(
     val icon: ImageVector? = null,
     val actions: List<NoticeAction> = emptyList(),
     val custom: (@Composable (Modifier, onClose: (() -> Unit)?) -> Unit)? = null,
-) {
-    val closable get() = level >= Level.Suggestion
+    val closable: Boolean = level >= Level.Suggestion,
+)
+
+// A temperature change the controller ignored or that failed, per room, from the app or the widget. Kept in
+// settings so it waits for the user without the notification permission; gone when closed or the room is changed.
+private const val WRITE_NOTICE = "notice.write."
+private const val OPERATION_NOTICE = "notice.operation."
+private const val NOTICE_SESSION = "noticeSession"
+
+internal enum class OperationNotice { AwayFailed, BackFailed, AwayKept, AcOff, AcOn, AllFailed }
+
+fun noticeSession(settings: Settings) = settings.getStringOrNull(NOTICE_SESSION)
+
+internal fun startNoticeSession(settings: Settings) {
+    clearSessionNotices(settings)
+    settings.putString(NOTICE_SESSION, Uuid.random().toString())
 }
+
+internal fun clearSessionNotices(settings: Settings) {
+    settings.remove(NOTICE_SESSION)
+    settings.keys.filter { it.startsWith(WRITE_NOTICE) || it.startsWith(OPERATION_NOTICE) }.forEach(settings::remove)
+}
+
+fun saveWriteNotice(settings: Settings, roomId: String, text: String?) =
+    if (text == null) settings.remove(WRITE_NOTICE + roomId) else settings.putString(WRITE_NOTICE + roomId, text)
+
+internal fun loadWriteNotices(settings: Settings): Map<String, String> =
+    settings.keys.filter { it.startsWith(WRITE_NOTICE) }.associate { it.removePrefix(WRITE_NOTICE) to settings.getString(it, "") }
+
+internal fun saveOperationNotice(settings: Settings, notice: OperationNotice, text: String?) {
+    val key = OPERATION_NOTICE + notice.name
+    if (text == null) settings.remove(key) else settings.putString(key, text)
+}
+
+internal fun loadOperationNotices(settings: Settings) = OperationNotice.entries.mapNotNull { notice ->
+    settings.getStringOrNull(OPERATION_NOTICE + notice.name)?.let { notice to it }
+}.toMap()
 
 @Composable
 internal fun NoticeCard(n: Notice, modifier: Modifier = Modifier, onClose: (() -> Unit)? = null) {
@@ -144,7 +180,7 @@ internal fun roomIssues(
 internal fun roomNotices(
     model: HomeModel, acs: AcModel, discoverAc: (() -> Unit)?, onScheduleLocked: () -> Unit, openRoom: (String) -> Unit,
 ): List<Notice> {
-    val h = model.home ?: return emptyList()
+    val h = model.home
     val outside = model.outside
     val watched = model.watched // the background check's view; null when alerts are off or it's stale
     val list = mutableListOf<Notice>()
@@ -152,7 +188,32 @@ internal fun roomNotices(
         list += Notice("error", Level.Error, e, icon = CloudOffIcon,
             actions = listOf(NoticeAction(stringResource(Res.string.retry)) { model.refresh() }))
     }
-    val issues = roomIssues(h.rooms, watched, outside, model.warmAbove, model.shownIssues + model.closed) {
+    if (model.alertsOn && !model.notificationsAllowed) list += Notice("notifications", Level.Warning,
+        stringResource(Res.string.notice_notifications_off), icon = WarningIcon,
+        actions = listOf(NoticeAction(stringResource(Res.string.notice_notifications_allow), onClick = model.openNotificationSettings)))
+    model.writeNotices.forEach { (id, text) ->
+        list += Notice("write-$id", Level.Warning, text, icon = WarningIcon, closable = true)
+    }
+    model.operationNotices.forEach { (operation, text) ->
+        val retry = when (operation) {
+            OperationNotice.AwayFailed -> NoticeAction(stringResource(Res.string.retry), !model.awayBusy) {
+                model.retryAway { acs.setAway(true) }
+            }
+            OperationNotice.BackFailed -> NoticeAction(stringResource(Res.string.retry), !model.awayBusy) {
+                model.comeBack { acs.setAway(false) }
+            }
+            else -> null
+        }
+        val title = when (operation) {
+            OperationNotice.AwayFailed -> stringResource(Res.string.away_failed)
+            OperationNotice.BackFailed -> stringResource(Res.string.back_failed)
+            OperationNotice.AllFailed -> stringResource(Res.string.all_failed)
+            else -> null
+        }
+        list += Notice("operation-${operation.name}", if (retry == null) Level.Warning else Level.Error,
+            text, title, WarningIcon, listOfNotNull(retry), closable = retry == null)
+    }
+    val issues = roomIssues(h?.rooms.orEmpty(), watched, outside, model.warmAbove, model.shownIssues + model.closed) {
         acs.room(it)?.state
     }
     val issueKeys = issues.map { it.key }.toSet()
@@ -181,7 +242,7 @@ internal fun roomNotices(
             }
         }
     }
-    if (h.rooms.isNotEmpty()) {
+    if (h != null && h.rooms.isNotEmpty()) {
         val found = acs.found.firstOrNull()
         // Found can be minimized but not closed: closing would lose the AC until it drops off the network.
         if (found != null) list += Notice("ac-found", Level.Suggestion, custom = { m, _ ->
@@ -192,7 +253,9 @@ internal fun roomNotices(
         })
     }
     // Include pending AC tips so a weather outage alone never resets a dismissal.
-    val keys = issueKeys + list.map { it.key }
-    LaunchedEffect(keys) { model.forgetClosed(keys) }
+    if (h != null) {
+        val keys = issueKeys + list.map { it.key }
+        LaunchedEffect(keys) { model.forgetClosed(keys) }
+    }
     return list.filter { it.key !in model.closed }.sortedBy { it.level }
 }
