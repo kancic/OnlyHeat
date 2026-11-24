@@ -3,6 +3,9 @@ package ancic.karim.onlyheat
 import ancic.karim.onlyheat.res.*
 import com.russhwolf.settings.Settings
 import org.jetbrains.compose.resources.getString
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlin.time.Clock
 
 // Away mode, room boosts and background alerts. State lives in Settings so the app, the widget and the
@@ -16,7 +19,7 @@ private fun String.dec(): Double? = if (this == "off") null else toDoubleOrNull(
 // Settings only hold strings: maps as "k=v,k=v", sets as "a,b".
 private fun <V> encodeMap(m: Map<String, V>, enc: (V) -> String) = m.entries.joinToString(",") { "${it.key}=${enc(it.value)}" }
 private fun decodeMap(v: String) = v.split(',').filter { '=' in it }.associate { it.substringBefore('=') to it.substringAfter('=') }
-private fun decodeSet(v: String) = v.split(',').filter { it.isNotEmpty() }.toSet()
+internal fun decodeSet(v: String) = v.split(',').filter { it.isNotEmpty() }.toSet()
 
 // ---------- Away ----------
 
@@ -71,6 +74,7 @@ internal fun clearSession(s: Settings, key: String): Boolean {
     s.remove(controllerSerialSetting(key))
     s.keys.filter { k -> listOf("away.", "boost.", "watch.", "lastTarget.").any(k::startsWith) }.forEach(s::remove)
     s.remove("authKey")
+    s.clearAcLinks()
     return true
 }
 
@@ -96,7 +100,7 @@ sealed interface Alert {
     data class Window(val room: String, val drop: Double) : Alert
     data class NotWarming(val room: String, val temp: Double, val target: Double) : Alert
     data class TooHot(val room: String, val temp: Double, val target: Double) : Alert
-    data class UseAc(val rooms: List<String>, val outside: Double) : Alert
+    data class UseAc(val rooms: List<Room>, val outside: Double) : Alert
 }
 
 const val WINDOW_DROP = 1.5 // °C between two checks while heating = probably an open window
@@ -169,7 +173,7 @@ fun watch(prev: WatchState, home: Home?, controllerOffline: Boolean, coldBelow: 
         }
     }
     // One notification for all rooms that got too warm, not one per room in a heatwave.
-    val newlyWarm = home.rooms.filter { it.id in warm && it.id !in prev.warm }.map { it.name }
+    val newlyWarm = home.rooms.filter { it.id in warm && it.id !in prev.warm }
     if (outside != null && newlyWarm.isNotEmpty()) alerts += Alert.UseAc(newlyWarm, outside)
     val last = home.rooms.mapNotNull { r -> r.current?.let { r.id to it } }.toMap()
     return WatchState(false, cold, window, stuck, hot, warm, warmFrom, last, now) to alerts
@@ -212,8 +216,13 @@ internal fun isCold(room: Room, s: Settings): Boolean = coldLimit(s).let { it !=
 
 fun alertsEnabled(s: Settings) = s.getBoolean("alerts.on", false)
 
-/** One background check: returns the texts to notify. Called by the Android worker every ~20 minutes. */
-suspend fun checkAlerts(api: HeatApi, s: Settings): List<String> {
+/** A notification to post; [acLinks] identify the pairings it can offer to turn on. */
+data class AlertNote(val text: String, val acLinks: List<String> = emptyList())
+
+/** One background check: returns what to notify. Called by the Android worker every ~20 minutes. */
+suspend fun checkAlerts(api: HeatApi, s: Settings): List<AlertNote> = checkAlerts(api, s, ::acTipState)
+
+internal suspend fun checkAlerts(api: HeatApi, s: Settings, readAc: suspend (LinkedAc) -> AcState?): List<AlertNote> {
     val key = savedAuthKey(s) ?: return emptyList()
     val result = attempt { api.home(key) }
     val e = result.exceptionOrNull()
@@ -231,8 +240,25 @@ suspend fun checkAlerts(api: HeatApi, s: Settings): List<String> {
     }
     if (savedAuthKey(s) != key) return emptyList()
     val (next, alerts) = watch(loadWatch(s), home, offline, coldLimit(s), nowSeconds(), warmAbove)
-    saveWatch(s, next)
-    return alerts.map { alertText(it) }
+    val suppressed = mutableSetOf<String>()
+    val notes = alerts.mapNotNull { alert ->
+        if (alert !is Alert.UseAc) return@mapNotNull AlertNote(alertText(alert))
+        val acs = alert.rooms.associate { it.id to s.linkedAc(key, it.id) }
+        // Don't suggest an AC that is already cooling. Away from home it can't be asked, so the tip stays.
+        val states = coroutineScope { alert.rooms.map { r -> async { acs[r.id]?.let { readAc(it) } } }.awaitAll() }
+        val rooms = alert.rooms.filterIndexed { i, room ->
+            val temp = room.current
+            val cooling = temp != null && states[i]?.cools(temp) == true &&
+                s.linkedAc(key, room.id)?.id == acs[room.id]?.id
+            if (cooling) suppressed += room.id
+            !cooling
+        }
+        if (rooms.isEmpty()) null
+        else AlertNote(alertText(alert.copy(rooms = rooms)), rooms.mapNotNull { s.linkedAc(key, it.id)?.id })
+    }
+    if (savedAuthKey(s) != key) return emptyList()
+    saveWatch(s, next.copy(warm = next.warm - suppressed))
+    return notes
 }
 
 private suspend fun alertText(a: Alert) = when (a) {
@@ -242,5 +268,5 @@ private suspend fun alertText(a: Alert) = when (a) {
     is Alert.Window -> getString(Res.string.alert_window, a.room, fmt1(a.drop))
     is Alert.NotWarming -> getString(Res.string.alert_not_warming, a.room, fmt1(a.temp), fmt1(a.target))
     is Alert.TooHot -> getString(Res.string.alert_too_hot, a.room, fmt1(a.temp), fmt1(a.target))
-    is Alert.UseAc -> getString(Res.string.alert_use_ac, a.rooms.joinToString(", "), fmt1(a.outside))
+    is Alert.UseAc -> getString(Res.string.alert_use_ac, a.rooms.joinToString(", ") { it.name }, fmt1(a.outside))
 }

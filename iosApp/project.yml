@@ -13,7 +13,7 @@ targets:
         CADisableMinimumFrameDurationOnPhone: true
         UILaunchScreen: {}
         CFBundleDisplayName: OnlyHeat
-        NSLocalNetworkUsageDescription: OnlyHeat talks to your heating controller on the local network.
+        NSLocalNetworkUsageDescription: OnlyHeat talks to your heating controller and air conditioner on the local network.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ancic.karim.onlyheat

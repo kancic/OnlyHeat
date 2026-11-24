@@ -29,6 +29,9 @@
             </intent-filter>
         </activity>
         <receiver
+            android:name=".AcReceiver"
+            android:exported="false" />
+        <receiver
             android:name=".HeatWidgetReceiver"
             android:exported="true">
             <intent-filter>

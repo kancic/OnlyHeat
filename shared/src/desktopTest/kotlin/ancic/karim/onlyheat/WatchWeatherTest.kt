@@ -60,6 +60,26 @@ class WatchWeatherTest {
             assertEquals(emptyList(), checkAlerts(api, settings))
             weatherAvailable = true
             assertEquals(emptyList(), checkAlerts(api, settings))
+
+            val ac = LinkedAc("gree", "f4911ed454bb", "192.168.100.53", "test")
+            val cooling = AcState(true, AcMode.Cool, 24, AcFan.Auto)
+            settings.linkAc("test-key", "1", ac)
+            sensorTemp = 31
+            roomTemp = 24
+            assertEquals(emptyList(), checkAlerts(api, settings) { cooling })
+            roomTemp = 27
+            assertEquals(emptyList(), checkAlerts(api, settings) { cooling })
+            assertEquals(emptySet(), loadWatch(settings).warm)
+
+            val tip = checkAlerts(api, settings) { cooling.copy(power = false) }.single()
+            assertEquals(listOf(ac.id), tip.acLinks)
+            assertEquals(emptyList(), checkAlerts(api, settings) { cooling.copy(power = false) })
+
+            roomTemp = 24
+            assertEquals(emptyList(), checkAlerts(api, settings) { cooling })
+            roomTemp = 27
+            val highTargetTip = checkAlerts(api, settings) { cooling.copy(target = 30) }.single()
+            assertEquals(listOf(ac.id), highTargetTip.acLinks)
         } finally {
             client.close()
             node.removeNode()

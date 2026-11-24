@@ -14,10 +14,10 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.foundation.lazy.staggeredgrid.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -37,6 +37,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.compose.NavigationBackHandler
 import androidx.navigationevent.compose.rememberNavigationEventState
@@ -52,6 +53,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.semantics.contentDescription
@@ -126,6 +128,7 @@ private enum class Tab(val label: StringResource, val icon: ImageVector) {
  * while the app is visible or when it next starts.
  * [backgroundAlerts] turns periodic alert checks on/off; null hides the Alerts setting.
  * [statusBarOnDark] switches the status bar icons to light while a screen draws something dark behind them.
+ * [hasLocalNetwork] reports local-network access for AC discovery, or null if the platform can't tell.
  */
 @Composable
 fun App(
@@ -136,6 +139,7 @@ fun App(
     dynamicScheme: (@Composable (dark: Boolean) -> ColorScheme?)? = null,
     statusBarOnDark: (Boolean) -> Unit = {},
     scheduleTipRequests: Flow<Unit> = emptyFlow(),
+    hasLocalNetwork: () -> Boolean? = { true },
 ) {
     OnlyHeatTheme(dynamicScheme) {
         Surface(Modifier.fillMaxSize()) {
@@ -148,7 +152,7 @@ fun App(
                 requestLocalNetwork,
                 statusBarOnDark
             ) { pairing -> savePairing(settings, pairing); key = pairing.key }
-            else Main(api, k, requestLocalNetwork, notify, wakeAt, backgroundAlerts, scheduleTipRequests) {
+            else Main(api, k, requestLocalNetwork, hasLocalNetwork, notify, wakeAt, backgroundAlerts, scheduleTipRequests) {
                 if (clearSession(settings, k)) key = null
             }
         }
@@ -259,7 +263,7 @@ internal class HomeModel(
     }
 
     /** Lowers every room that is on to [awayTemp] and remembers what each one had. */
-    fun goAway() = scope.launch {
+    fun goAway(updateAc: suspend () -> Unit) = scope.launch {
         val h = home ?: return@launch
         if (awayBusy) return@launch
         awayBusy = true
@@ -290,6 +294,7 @@ internal class HomeModel(
             load(); awayBusy = false
             snackbar.showSnackbar(errorText(e)); return@launch
         }
+        updateAc()
         delay(4000) // read back, like single rooms
         load()
         away = true; awayBusy = false
@@ -303,7 +308,7 @@ internal class HomeModel(
     }
 
     /** "I'm back": puts every room back to what it had before [goAway]. */
-    fun comeBack() = scope.launch {
+    fun comeBack(updateAc: suspend () -> Unit) = scope.launch {
         val saved = awaySaved(settings) ?: return@launch
         if (awayBusy) return@launch
         awayBusy = true
@@ -314,6 +319,7 @@ internal class HomeModel(
             load(); awayBusy = false
             snackbar.showSnackbar(errorText(e)); return@launch // still away, so it can be retried
         }
+        updateAc()
         if (savedAuthKey(settings) == key) saveAway(settings, null)
         delay(4000) // read back, like goAway
         load()
@@ -400,6 +406,7 @@ private fun Main(
     api: HeatApi,
     key: String,
     requestLocalNetwork: suspend () -> Boolean,
+    hasLocalNetwork: () -> Boolean?,
     notify: (suspend (String) -> Unit)?,
     wakeAt: ((Long) -> Unit)?,
     backgroundAlerts: ((Boolean) -> Unit)?,
@@ -411,7 +418,10 @@ private fun Main(
     model.visible = { lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
     model.notify = notify
     model.wakeAt = wakeAt
-    model.onLoggedOut = onLogout
+    val acs = koinViewModel<AcModel>(key = "ac:$key") { parametersOf(key) }
+    val logout = { acs.endSession(); onLogout() }
+    model.onLoggedOut = logout
+    acs.snackbar = model.snackbar
     LaunchedEffect(model, lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             launch { model.watchBoostExpiry() }
@@ -423,9 +433,17 @@ private fun Main(
     val backStack =
         rememberSaveable(saver = backStackSaver) { mutableStateListOf<Screen>(Screen.Main) }
     var tab by rememberSaveable { mutableStateOf(Tab.Rooms) }
+    var lanAvailable by remember { mutableStateOf(hasLocalNetwork()) }
     LaunchedEffect(model, lifecycle, tab) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             if (tab == Tab.Rooms) {
+                launch {
+                    while (true) {
+                        lanAvailable = hasLocalNetwork()
+                        acs.refresh(lanAvailable)
+                        delay(2.minutes)
+                    }
+                }
                 model.refreshOnResume()
                 // Slow poll, only while the Rooms tab is on screen
                 while (true) { delay(2.minutes); model.refreshRooms() }
@@ -467,12 +485,16 @@ private fun Main(
                                 tab,
                                 { tab = it },
                                 model,
+                                acs,
                                 api,
                                 key,
                                 host,
                                 requestLocalNetwork,
-                                backgroundAlerts,
-                                onLogout = onLogout,
+                                discoverAc = if (lanAvailable ?: acs.lanScanSucceeded) null else {
+                                    { acs.discover { requestLocalNetwork().also { lanAvailable = hasLocalNetwork() } } }
+                                },
+                                backgroundAlerts = backgroundAlerts,
+                                onLogout = logout,
                                 onScheduleLocked = { showScheduleTip = true },
                                 scheduleTipOpen = showScheduleTip,
                             ) {
@@ -490,6 +512,14 @@ private fun Main(
                                 onBoost = { model.boost(room, it) },
                                 onStopBoost = { model.stopBoost(room) },
                                 onSmartChanged = model::refreshRooms,
+                                ac = acs.room(room.id),
+                                acCard = { ac ->
+                                    AcCard(
+                                        room, ac, { acs.set(room.id, it) },
+                                        onHeatingOff = { model.heatingOff(room) { showScheduleTip = true } },
+                                        onRemove = { acs.unlink(room.id) },
+                                    )
+                                },
                             ) { backStack.removeLastOrNull() }
                         }
 
@@ -536,10 +566,12 @@ private fun MainTabs(
     tab: Tab,
     onTab: (Tab) -> Unit,
     model: HomeModel,
+    acs: AcModel,
     api: HeatApi,
     key: String,
     host: String,
     requestLocalNetwork: suspend () -> Boolean,
+    discoverAc: (() -> Unit)?,
     backgroundAlerts: ((Boolean) -> Unit)?,
     onLogout: () -> Unit,
     onScheduleLocked: () -> Unit,
@@ -557,8 +589,8 @@ private fun MainTabs(
         }) { displayedTab ->
             when (displayedTab) {
                 Tab.Rooms -> {
-                    if (tab == Tab.Rooms && !scheduleTipOpen) RoomsTip()
-                    RoomsTab(model, onScheduleLocked) { open(Screen.RoomDetail(it)) }
+                    if (tab == Tab.Rooms && !scheduleTipOpen) RoomsTip(hasAc = acs.linked.isNotEmpty())
+                    RoomsTab(model, acs, discoverAc, onScheduleLocked) { open(Screen.RoomDetail(it)) }
                 }
                 Tab.History -> OverviewScreen(
                     api,
@@ -657,7 +689,20 @@ private fun WeatherPill(emoji: String?, outside: Double, big: Boolean) {
 }
 
 @Composable
-private fun RoomsTab(model: HomeModel, onScheduleLocked: () -> Unit, openRoom: (String) -> Unit) {
+private fun roomsSubtitle(h: Home, acs: List<AcState?>): String {
+    val heating = h.rooms.count { it.heating && it.target != null }
+    return listOfNotNull(
+        pluralStringResource(Res.plurals.rooms, h.rooms.size, h.rooms.size),
+        if (heating > 0) stringResource(Res.string.heating_count, heating) else stringResource(Res.string.idle),
+        acSummary(acs),
+    ).joinToString(" · ")
+}
+
+@Composable
+private fun RoomsTab(
+    model: HomeModel, acs: AcModel, discoverAc: (() -> Unit)?, onScheduleLocked: () -> Unit, openRoom: (String) -> Unit,
+) {
+    var acSheet by rememberSaveable { mutableStateOf<String?>(null) } // room id
     val scroll = collapsingBar()
     val pull = rememberPullToRefreshState()
     Scaffold(
@@ -673,20 +718,8 @@ private fun RoomsTab(model: HomeModel, onScheduleLocked: () -> Unit, openRoom: (
                         Column(Modifier.weight(1f)) {
                             Text(h?.device ?: "OnlyHeat")
                             if (h != null) {
-                                val heating = h.rooms.count { it.heating && it.target != null }
                                 Text(
-                                    listOfNotNull(
-                                        pluralStringResource(
-                                            Res.plurals.rooms,
-                                            h.rooms.size,
-                                            h.rooms.size
-                                        ),
-                                        if (heating > 0) stringResource(
-                                            Res.string.heating_count,
-                                            heating
-                                        )
-                                        else stringResource(Res.string.idle),
-                                    ).joinToString(" · "),
+                                    roomsSubtitle(h, acs.linkedStates),
                                     style = if (expanded) MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelMedium,
                                 )
                             }
@@ -729,15 +762,16 @@ private fun RoomsTab(model: HomeModel, onScheduleLocked: () -> Unit, openRoom: (
                 // The app bar listens inside the refresh box, so a downward drag first expands the
                 // collapsed bar and only then pulls to refresh.
                 else -> BoxWithConstraints(Modifier.fillMaxSize().collapsing(scroll)) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 340.dp),
+                    // Staggered: a room with an AC is taller (two rows), and each column stacks on its own,
+                    // so the card beside it doesn't leave a gap under itself.
+                    LazyVerticalStaggeredGrid(
+                        columns = StaggeredGridCells.Adaptive(minSize = 340.dp),
                         contentPadding = cappedPadding(1200.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalItemSpacing = 12.dp,
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        val span: (androidx.compose.foundation.lazy.grid.LazyGridItemSpanScope.() -> GridItemSpan) =
-                            { GridItemSpan(maxLineSpan) }
+                        val span = StaggeredGridItemSpan.FullLine
                         model.error?.let { e ->
                             item(span = span) {
                                 Text(
@@ -751,8 +785,7 @@ private fun RoomsTab(model: HomeModel, onScheduleLocked: () -> Unit, openRoom: (
                                 model.awayTemp,
                                 model.awayBusy,
                                 Modifier.springIn(0),
-                                model::comeBack
-                            )
+                            ) { model.comeBack { acs.setAway(false) } }
                         }
                         if (h.rooms.size > 1 && !model.away) item {
                             QuickCard(
@@ -771,8 +804,16 @@ private fun RoomsTab(model: HomeModel, onScheduleLocked: () -> Unit, openRoom: (
                                 stringResource(Res.string.away_go),
                                 Modifier.springIn(1),
                                 model.awayBusy,
-                                model::goAway
-                            )
+                            ) { model.goAway { acs.setAway(true) } }
+                        }
+                        if (h.rooms.isNotEmpty()) {
+                            val ac = acs.found.firstOrNull()
+                            if (ac != null) item(span = span, key = "ac-${ac.mac}") {
+                                AcFoundCard(h.rooms, acs.binding, acs.minimized, Modifier.springIn(2), { acs.assign(ac, it) }, acs::minimize)
+                            }
+                            else if (discoverAc != null) item(span = span, key = "ac-discovery") {
+                                AcDiscoveryCard(acs.discovering, enabled = !acs.discovering && !acs.binding, onDiscover = discoverAc)
+                            }
                         }
                         itemsIndexed(h.rooms, key = { _, r -> r.id }) { i, r ->
                             RoomCard(
@@ -781,6 +822,10 @@ private fun RoomsTab(model: HomeModel, onScheduleLocked: () -> Unit, openRoom: (
                                 { model.lastTarget(r.id) },
                                 Modifier.springIn(i + 2),
                                 onScheduleLocked = onScheduleLocked,
+                                ac = acs.room(r.id),
+                                onAcChange = { acs.set(r.id, it) },
+                                onAcMore = { acSheet = r.id },
+                                onHeatingOff = { model.heatingOff(r, onScheduleLocked) },
                                 onOpen = { openRoom(r.id) }) { t -> model.setTarget(r, t) }
                         }
                         if (h.rooms.isEmpty()) item(span = span) { Text(stringResource(Res.string.no_rooms)) }
@@ -789,6 +834,13 @@ private fun RoomsTab(model: HomeModel, onScheduleLocked: () -> Unit, openRoom: (
             }
         }
     }
+    val sheetRoom = model.home?.rooms?.find { it.id == acSheet }
+    val sheetAc = acSheet?.let { acs.room(it) }
+    if (sheetRoom != null && sheetAc != null) AcSheet(
+        sheetRoom, sheetAc, { acs.set(sheetRoom.id, it) },
+        onHeatingOff = { model.heatingOff(sheetRoom, onScheduleLocked) },
+        onRemove = { acs.unlink(sheetRoom.id); acSheet = null },
+    ) { acSheet = null }
 }
 
 @Composable
@@ -1171,6 +1223,11 @@ private fun LoginSteps(title: StringResource, steps: List<StringResource>) {
     }
 }
 
+/** The AC card's "Turn heating off": a scheduled room can't be switched by hand, so explain why ([onLocked]). */
+private fun HomeModel.heatingOff(room: Room, onLocked: () -> Unit) {
+    if (room.schedule) onLocked() else setTarget(room, null)
+}
+
 @Composable
 private fun RoomCard(
     room: Room,
@@ -1178,25 +1235,33 @@ private fun RoomCard(
     lastTarget: () -> Double,
     modifier: Modifier,
     onScheduleLocked: () -> Unit,
+    ac: AcView? = null, // the room's AC: its row goes under the heating row, and it drives the animations too
+    onAcChange: (AcChange) -> Unit = {},
+    onAcMore: () -> Unit = {}, // tapping the AC's name: mode and fan
+    onHeatingOff: () -> Unit = {}, // the chip shown while the heating works against the AC
     onOpen: () -> Unit,
     onTarget: (Double?) -> Unit
 ) {
     val on = room.target != null
-    val active = room.heating && on
+    val onSwitch = { it: Boolean -> if (room.schedule) onScheduleLocked() else onTarget(if (it) lastTarget() else null) }
+    val activity = RoomActivity(room, ac)
+    val active = activity.floor
+    val acOn = activity.acOn
     val scheme = MaterialTheme.colorScheme
     val cold = isCold(
         room,
         koinInject()) // read each recomposition, so a changed limit shows up
-    val asleep = !on && !cold
+    val awake = activity.awake
+    val asleep = !awake && !cold
     val spec = MaterialTheme.motionScheme.defaultEffectsSpec<Color>()
     // Off and asleep: a night-sky card in any theme, like the fire's fixed orange. Heating shows as fire on top.
     val container by animateColorAsState(
-        if (asleep) NightSky else if (on) roomContainer(room.id) else scheme.surfaceContainerLow,
+        if (asleep) NightSky else if (awake) roomContainer(room.id) else scheme.surfaceContainerLow,
         spec
     )
     val content by animateColorAsState(
         if (asleep) NightInk else contentColorFor(
-            if (on) roomContainer(
+            if (awake) roomContainer(
                 room.id
             ) else scheme.surfaceContainerLow
         ), spec
@@ -1207,17 +1272,20 @@ private fun RoomCard(
     ) {
         val ink = LocalContentColor.current
         Column(
-            Modifier.flames(active, room.id, boosted)
-                .drift(on && !active, ink.copy(alpha = 0.10f), room.id) // at target: warm bubbles
-                .night(asleep, ink, room.id) // off: moon, stars, z's
-                .frost(cold, room.id) // below the cold-alert temperature: ice on glass
-                .padding(20.dp),
+            Modifier.roomAnimations(
+                room, ac, cold, ink, boosted,
+                // With an AC the moon sleeps in the gap between the rows' names and switches, not on the Floor switch.
+                moon = if (ac == null) Offset(0.70f, 0.56f) else Offset(0.52f, 0.66f),
+                zTo = if (ac == null) Offset(0.86f, 0.48f) else Offset(0.66f, 0.5f),
+            ).padding(20.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(room.name, style = MaterialTheme.typography.titleLargeEmphasized)
+                    Text(room.name, style = MaterialTheme.typography.titleLargeEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     val status = listOfNotNull(
-                        if (active) stringResource(Res.string.status_heating) else null,
+                        // With an AC say which one works: "Floor heating · AC cooling".
+                        if (active) stringResource(if (ac == null) Res.string.status_heating else Res.string.floor_heating) else null,
+                        if (acOn) acSummary(listOf(ac?.state)) else null,
                         room.humidity?.let {
                             stringResource(
                                 Res.string.humidity,
@@ -1230,13 +1298,35 @@ private fun RoomCard(
                     ).joinToString(" · ")
                     if (status.isNotEmpty()) Text(
                         status, style = MaterialTheme.typography.labelLarge,
-                        color = LocalContentColor.current.copy(alpha = if (active) 1f else 0.75f),
+                        color = LocalContentColor.current.copy(alpha = if (active || acOn) 1f else 0.75f),
                     )
                 }
-                Switch(on, { if (room.schedule) onScheduleLocked() else onTarget(if (it) lastTarget() else null) })
+                // With an AC the switch moves into the heating row and the temperature takes its place, smaller.
+                if (ac == null) CardSwitch(on, onSwitch)
+                else RollingTemp(room.current, MaterialTheme.typography.displaySmall)
             }
-            Spacer(Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.height(if (ac == null) 12.dp else 8.dp))
+            if (ac != null) {
+                // Like the AC's mode icon: a flame while heating, a thermostat while holding the target, a faded flame when off.
+                DeviceRow(
+                    floorIcon(on, active), stringResource(Res.string.heating_title), on, onSwitch,
+                    description = stringResource(if (active) Res.string.status_heating else if (on) Res.string.idle else Res.string.off),
+                ) {
+                    if (on) TempStepper(room.target, onTarget, compact = true, onLocked = onScheduleLocked.takeIf { room.schedule })
+                }
+                AcRow(ac, onAcChange, onAcMore)
+                // The details' warning, one tap away: the tug of war alone doesn't say how to end it.
+                if (fighting(room, ac.state)) AssistChip(
+                    onHeatingOff, { Text(stringResource(Res.string.ac_fighting_short)) },
+                    Modifier.padding(top = 4.dp),
+                    leadingIcon = { Icon(FlameIcon, null, Modifier.size(AssistChipDefaults.IconSize)) },
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor = scheme.errorContainer, labelColor = scheme.onErrorContainer,
+                        leadingIconContentColor = scheme.onErrorContainer,
+                    ),
+                    border = null,
+                )
+            } else Row(verticalAlignment = Alignment.CenterVertically) {
                 RollingTemp(
                     room.current,
                     MaterialTheme.typography.displayMedium,

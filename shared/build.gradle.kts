@@ -1,4 +1,5 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -24,6 +25,10 @@ kotlin {
         androidResources { enable = true } // required for compose resources to be packaged
     }
     jvm("desktop")
+    // jvmCommonMain: plain-Java code Android and desktop share (network interfaces, AES).
+    applyDefaultHierarchyTemplate {
+        common { group("jvmCommon") { withJvm(); withCompilations { it.target.platformType == KotlinPlatformType.androidJvm } } }
+    }
     listOf(iosArm64(), iosSimulatorArm64()).forEach {
         it.binaries.framework { baseName = "Shared"; isStatic = true }
     }
@@ -38,6 +43,7 @@ kotlin {
             implementation(libs.compose.resources)
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.logging)
+            implementation(libs.ktor.network)
             implementation(libs.kotlinx.serialization.json)
             api(libs.settings) // in the signatures the Android worker and widget call
             implementation(libs.navigation3.ui)

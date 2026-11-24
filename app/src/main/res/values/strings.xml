@@ -8,4 +8,6 @@
     <string name="widget_write_failed">Couldn\'t change the temperature. Check your connection.</string>
     <string name="widget_no_rooms">No rooms.</string>
     <string name="widget_more">+%1$d more</string>
+    <string name="ac_turn_on">Turn on AC</string>
+    <string name="ac_turn_on_failed">The air conditioner didn’t respond. Are you on your home Wi-Fi?</string>
 </resources>

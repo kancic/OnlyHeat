@@ -91,7 +91,7 @@ class WatchTest {
     fun acTipOnceForAllWarmRoomsWhenItsHotOutside() {
         val hot = home(room("1", 27.0, null), room("2", 26.5, null), room("3", 24.0, null), outside = 31.0)
         val (s, a) = watch(WatchState(), hot, false, null, 0)
-        assertEquals(listOf<Alert>(Alert.UseAc(listOf("R1", "R2"), 31.0)), a)
+        assertEquals(listOf<Alert>(Alert.UseAc(hot.rooms.take(2), 31.0)), a)
         assertEquals(emptyList(), watch(s, hot, false, null, 900).second) // no repeat
         // cooler outside than inside: open a window instead, no AC tip
         assertEquals(emptyList(), watch(WatchState(), home(room("1", 27.0, null), outside = 22.0), false, null, 0).second)

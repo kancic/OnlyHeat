@@ -37,6 +37,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -84,7 +85,10 @@ private fun SubScreen(
 @Composable
 fun RoomScreen(
     api: HeatApi, key: String, room: Room, boost: Boost?,
-    onBoost: (minutes: Int) -> Unit, onStopBoost: () -> Unit, onSmartChanged: () -> Unit, onBack: () -> Unit,
+    onBoost: (minutes: Int) -> Unit, onStopBoost: () -> Unit, onSmartChanged: () -> Unit,
+    ac: AcView? = null, // the room's AC: the hero then shows the floor and the AC as two equal lines and animates for both
+    acCard: @Composable (AcView) -> Unit = {}, // its controls, under the hero
+    onBack: () -> Unit,
 ) {
     val settings = koinInject<Settings>()
     val history = koinInject<ReadingDao>()
@@ -115,28 +119,38 @@ fun RoomScreen(
             Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).wrapContentWidth().widthIn(max = 720.dp).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
           ) {
-            val heating = room.heating && room.target != null
+            val activity = RoomActivity(room, ac)
+            val heating = activity.floor
             val on = room.target != null
             val cold = isCold(room, settings)
-            val asleep = !on && !cold
+            val asleep = !activity.awake && !cold
             val spec = MaterialTheme.motionScheme.defaultEffectsSpec<Color>()
             val blob by animateColorAsState(if (asleep) NightSky else roomContainer(room.id), spec)
             val ink by animateColorAsState(if (asleep) NightInk else contentColorFor(roomContainer(room.id)), spec)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Hero: the temperature sits in a blob that turns into a spinning cookie while heating,
                 // with the list card's animations inside, clipped to the blob.
-                MorphBlob(heating, blob, Modifier.size(184.dp)) {
+                MorphBlob(heating || activity.acOn, blob, Modifier.size(184.dp)) {
                     Box(
-                        Modifier.matchParentSize()
-                            .flames(heating, room.id)
-                            .drift(on && !heating, ink.copy(alpha = 0.12f), room.id)
-                            .night(asleep, ink, room.id, moon = Offset(0.42f, 0.2f), zTo = Offset(0.72f, 0.12f)) // above the number
-                            .frost(cold, room.id),
+                        Modifier.matchParentSize().roomAnimations(
+                            room, ac, cold, ink, bubbles = 0.12f,
+                            moon = Offset(0.42f, 0.2f), zTo = Offset(0.72f, 0.12f), // above the number
+                        ),
                     )
                     RollingTemp(room.current, MaterialTheme.typography.displayMediumEmphasized, color = ink)
                 }
                 Spacer(Modifier.width(20.dp))
-                Column {
+                if (ac != null) Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    // Like the card's rows: the icon tells what each one does, the number what it aims for.
+                    HeroDevice(
+                        floorIcon(on, heating), room.target?.let { "${fmt1(it)}°" } ?: stringResource(Res.string.off_lower),
+                        stringResource(Res.string.heating_title), on,
+                    )
+                    HeroDevice(
+                        acIcon(ac.state), acValue(ac.state, ac.loaded), stringResource(Res.string.ac_short), activity.acOn,
+                    )
+                }
+                else Column {
                     Text(
                         room.target?.let { stringResource(Res.string.target_value, fmt1(it)) } ?: stringResource(Res.string.off_lower),
                         style = MaterialTheme.typography.headlineSmallEmphasized,
@@ -174,6 +188,7 @@ fun RoomScreen(
                 }
             }
 
+            ac?.let { acCard(it) }
             BoostCard(boost, onBoost, onStopBoost)
             val supported = remember { hasThermalIntelligence(settings.getStringOrNull(FIRMWARE)) }
             // Old firmware: only show it while it's on, so it can be turned off.
@@ -182,6 +197,20 @@ fun RoomScreen(
                 onSmartChanged()
             }
           }
+    }
+}
+
+/** One device beside the room's hero temperature: its icon (faded when off), its target, its name under it. */
+@Composable
+private fun HeroDevice(icon: ImageVector, value: String, name: String, on: Boolean) {
+    val primary = MaterialTheme.colorScheme.primary
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, Modifier.size(28.dp), tint = if (on) primary else primary.copy(alpha = 0.5f))
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Text(value, style = MaterialTheme.typography.headlineSmallEmphasized, color = primary, maxLines = 1)
+            Text(name, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 

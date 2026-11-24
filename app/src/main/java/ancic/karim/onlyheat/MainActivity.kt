@@ -43,6 +43,9 @@ class MainActivity : ComponentActivity() {
         return ask.await()
     }
 
+    private fun hasLocalNetwork() = Build.VERSION.SDK_INT < 37 ||
+        checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") == PackageManager.PERMISSION_GRANTED
+
     override fun onCreate(savedInstanceState: Bundle?) {
         scheduleHistorySync()
         scheduleAlerts(alertsEnabled(get<Settings>()))
@@ -78,6 +81,7 @@ class MainActivity : ComponentActivity() {
                         !onDark && !resources.configuration.isNightModeActive
                 },
                 scheduleTipRequests = scheduleTips,
+                hasLocalNetwork = ::hasLocalNetwork,
             )
         }
     }

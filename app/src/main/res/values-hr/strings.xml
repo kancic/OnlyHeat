@@ -8,4 +8,6 @@
     <string name="widget_write_failed">Temperatura nije promijenjena. Provjerite vezu.</string>
     <string name="widget_no_rooms">Nema soba.</string>
     <string name="widget_more">još %1$d</string>
+    <string name="ac_turn_on">Uključi klimu</string>
+    <string name="ac_turn_on_failed">Klima se nije javila. Jeste li na kućnom Wi-Fiju?</string>
 </resources>

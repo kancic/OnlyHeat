@@ -21,6 +21,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
+import androidx.compose.ui.draw.scale
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,6 +79,29 @@ internal val CloudOffIcon = icon(
     "CloudOff",
     "M19.35,10.04C18.67,6.59 15.64,4 12,4c-1.48,0 -2.85,0.43 -4.01,1.17l1.46,1.46C10.21,6.23 11.08,6 12,6c3.04,0 5.5,2.46 5.5,5.5v0.5H19c1.66,0 3,1.34 3,3 0,1.13 -0.64,2.11 -1.56,2.62l1.45,1.45C23.16,18.16 24,16.68 24,15c0,-2.64 -2.05,-4.78 -4.65,-4.96zM3,5.27l2.75,2.74C2.56,8.15 0,10.77 0,14c0,3.31 2.69,6 6,6h11.73l2,2L21,20.73 4.27,4 3,5.27zM7.73,10l8,8H6c-2.21,0 -4,-1.79 -4,-4s1.79,-4 4,-4h1.73z",
 )
+internal val AcIcon = icon(
+    "AcUnit",
+    "M22,11h-4.17l3.24,-3.24 -1.41,-1.42L15,11h-2V9l4.66,-4.66 -1.42,-1.41L13,6.17V2h-2v4.17L7.76,2.93 6.34,4.34 11,9v2H9L4.34,6.34 2.93,7.76 6.17,11H2v2h4.17l-3.24,3.24 1.41,1.42L9,13h2v2l-4.66,4.66 1.42,1.41L11,17.83V22h2v-4.17l3.24,3.24 1.42,-1.41L13,15v-2h2l4.66,4.66 1.41,-1.42L17.83,13H22z",
+)
+internal val ThermostatIcon = icon(
+    "Thermostat",
+    "M15,13V5c0,-1.66 -1.34,-3 -3,-3S9,3.34 9,5v8c-1.21,0.91 -2,2.37 -2,4c0,2.76 2.24,5 5,5s5,-2.24 5,-5C17,15.37 16.21,13.91 15,13zM11,5c0,-0.55 0.45,-1 1,-1s1,0.45 1,1h-1v1h1v2h-1v1h1v2h-2V5z",
+)
+internal val SunIcon = icon(
+    "WbSunny",
+    "M6.76,4.84l-1.8,-1.79 -1.41,1.41 1.79,1.79 1.42,-1.41zM4,10.5L1,10.5v2h3v-2zM13,0.55h-2L11,3.5h2L13,0.55zM20.45,4.46l-1.41,-1.41 -1.79,1.79 1.41,1.41 1.79,-1.79zM17.24,18.16l1.79,1.8 1.41,-1.41 -1.8,-1.79 -1.4,1.4zM20,10.5v2h3v-2h-3zM12,5.5c-3.31,0 -6,2.69 -6,6s2.69,6 6,6 6,-2.69 6,-6 -2.69,-6 -6,-6zM11,22.45h2L13,19.5h-2v2.95zM3.55,18.54l1.41,1.41 1.79,-1.8 -1.41,-1.41 -1.79,1.8z",
+)
+internal val DropIcon = icon("WaterDrop", "M12,2c-5.33,4.55 -8,8.48 -8,11.8c0,4.98 3.8,8.2 8,8.2s8,-3.22 8,-8.2C20,10.48 17.33,6.55 12,2z")
+internal val AirIcon = icon(
+    "Air",
+    "M14.5,17c0,1.65 -1.35,3 -3,3s-3,-1.35 -3,-3h2c0,0.55 0.45,1 1,1s1,-0.45 1,-1s-0.45,-1 -1,-1H2v-2h9.5C13.15,14 14.5,15.35 14.5,17zM19,6.5C19,4.57 17.43,3 15.5,3S12,4.57 12,6.5h2C14,5.67 14.67,5 15.5,5S17,5.67 17,6.5S16.33,8 15.5,8H2v2h13.5C17.43,10 19,8.43 19,6.5zM18.5,11H2v2h16.5c0.83,0 1.5,0.67 1.5,1.5S19.33,16 18.5,16v2c1.93,0 3.5,-1.57 3.5,-3.5S20.43,11 18.5,11z",
+)
+internal val AutoIcon = icon(
+    "Autorenew",
+    "M12,6v3l4,-4 -4,-4v3c-4.42,0 -8,3.58 -8,8 0,1.57 0.46,3.03 1.24,4.26L6.7,14.8c-0.45,-0.83 -0.7,-1.79 -0.7,-2.8 0,-3.31 2.69,-6 6,-6zM18.76,7.74L17.3,9.2c0.44,0.84 0.7,1.79 0.7,2.8 0,3.31 -2.69,6 -6,6v-3l-4,4 4,4v-3c4.42,0 8,-3.58 8,-8 0,-1.57 -0.46,-3.03 -1.24,-4.26z",
+)
+internal val ChevronRightIcon = icon("ChevronRight", "M10,6L8.59,7.41 13.17,12l-4.58,4.59L10,18l6,-6z")
+internal val ExpandLessIcon = icon("ExpandLess", "M12,8l-6,6 1.41,1.41L12,10.83l4.59,4.58L18,14z")
 internal val HomeIcon = icon("Home", "M10,20v-6h4v6h5v-8h3L12,3 2,12h3v8z")
 internal val ChartIcon = icon("ShowChart", "M3.5,18.49l6,-6.01 4,4L22,6.92l-1.41,-1.41 -7.09,7.97 -4,-4L2,16.99z")
 internal val FlameIcon = icon(
@@ -105,14 +129,33 @@ internal fun onCardTonal() = LocalContentColor.current.let {
     ButtonDefaults.filledTonalButtonColors(containerColor = it.copy(alpha = 0.12f), contentColor = it)
 }
 
+/** A room card's on/off switch: tinted with the card's own ink instead of the theme's bright primary and drawn a bit
+ *  smaller (the touch target stays), so it sits quietly on every room color. */
+@Composable
+internal fun CardSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
+    val ink = LocalContentColor.current
+    Switch(
+        checked, onChange, Modifier.scale(0.85f),
+        colors = SwitchDefaults.colors(
+            checkedThumbColor = ink, checkedTrackColor = ink.copy(alpha = 0.28f), checkedBorderColor = Color.Transparent,
+            uncheckedThumbColor = ink.copy(alpha = 0.55f), uncheckedTrackColor = Color.Transparent,
+            uncheckedBorderColor = ink.copy(alpha = 0.35f),
+        ),
+    )
+}
+
 /** − value + control with shape-morphing buttons and a rolling number. */
 @Composable
 internal fun TempStepper(
     value: Double,
     onChange: (Double) -> Unit,
-    buttonSize: Dp = 52.dp,
+    compact: Boolean = false, // a room card's device row: small buttons and number, so the row's name still fits
+    buttonSize: Dp = if (compact) 36.dp else 52.dp,
     label: String? = null,
     onLocked: (() -> Unit)? = null,
+    step: Double = STEP,
+    min: Double = MIN_T,
+    max: Double = MAX_T,
 ) {
     // Tint of whatever card we sit on, so the buttons stay visible on every container color.
     val content = LocalContentColor.current
@@ -125,20 +168,23 @@ internal fun TempStepper(
     val lockedState = if (onLocked != null) Modifier.semantics { stateDescription = locked } else Modifier
     Row(verticalAlignment = Alignment.CenterVertically) {
         FilledTonalIconButton(
-            onClick = onLocked ?: { onChange((value - STEP).coerceAtLeast(MIN_T)) },
+            onClick = onLocked ?: { onChange((value - step).coerceAtLeast(min)) },
             shapes = IconButtonDefaults.shapes(),
-            enabled = onLocked != null || value > MIN_T,
+            enabled = onLocked != null || value > min,
             colors = colors,
             modifier = Modifier.size(buttonSize).then(lockedState),
         ) { Text("−", style = MaterialTheme.typography.titleLarge) }
-        Column(Modifier.widthIn(min = 76.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            RollingTemp(value, MaterialTheme.typography.headlineSmallEmphasized, color = MaterialTheme.colorScheme.primary)
+        Column(Modifier.widthIn(min = if (compact) 60.dp else 76.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            RollingTemp(
+                value, if (compact) MaterialTheme.typography.titleLargeEmphasized else MaterialTheme.typography.headlineSmallEmphasized,
+                color = MaterialTheme.colorScheme.primary,
+            )
             label?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
         }
         FilledTonalIconButton(
-            onClick = onLocked ?: { onChange((value + STEP).coerceAtMost(MAX_T)) },
+            onClick = onLocked ?: { onChange((value + step).coerceAtMost(max)) },
             shapes = IconButtonDefaults.shapes(),
-            enabled = onLocked != null || value < MAX_T,
+            enabled = onLocked != null || value < max,
             colors = colors,
             modifier = Modifier.size(buttonSize).then(lockedState),
         ) { Text("+", style = MaterialTheme.typography.titleLarge) }

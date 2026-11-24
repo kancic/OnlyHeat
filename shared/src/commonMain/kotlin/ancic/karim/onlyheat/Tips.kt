@@ -48,7 +48,8 @@ internal fun unseenTips(s: Settings, ids: List<String>) = ids.filterNot { s.getB
 @Composable
 private fun FirstTimeTip(vararg all: TipPage) {
     val settings = koinInject<Settings>()
-    var unseen by remember { mutableStateOf(unseenTips(settings, all.map { it.id })) }
+    // Keyed on the pages: one that joins later (the AC page once an AC is linked) shows without a restart.
+    var unseen by remember(all.size) { mutableStateOf(unseenTips(settings, all.map { it.id })) }
     val pages = all.filter { it.id in unseen }
     var page by rememberSaveable { mutableStateOf(0) }
     if (pages.isEmpty()) return
@@ -127,9 +128,12 @@ private fun cycle(count: Int, ms: Long = 2_200): Int {
     return i
 }
 
-/** The welcome tour, on the Rooms tab right after the first login: what isn't obvious from the cards themselves. */
+/**
+ * The welcome tour, on the Rooms tab right after the first login: what isn't obvious from the cards themselves.
+ * The AC page joins once [hasAc] (an AC is linked to a room), so people without one never see it.
+ */
 @Composable
-internal fun RoomsTip() = FirstTimeTip(
+internal fun RoomsTip(hasAc: Boolean) = FirstTimeTip(
     // The card pictures carry meaning; nobody guesses that frost means "below your cold alert".
     TipPage("room-card-pictures", Res.string.tour_cards_title, Res.string.tour_cards) {
         val state = cycle(4)
@@ -146,7 +150,24 @@ internal fun RoomsTip() = FirstTimeTip(
         }
     },
     TipPage("away", Res.string.tour_away_title, Res.string.tour_away) { AwayScene() },
+    *listOfNotNull(if (hasAc) TipPage("ac", Res.string.tour_ac_title, Res.string.tour_ac) { AcScene() } else null).toTypedArray(),
 )
+
+/** The AC row's pictures: flames while heating, snow while the AC cools, and the tug of war when both run at once. */
+@Composable
+private fun AcScene() {
+    val state = cycle(3)
+    val cool = state > 0
+    Scene(
+        if (cool) MaterialTheme.colorScheme.surfaceContainerLow else warm(), if (cool) MaterialTheme.colorScheme.onSurface else warmInk(),
+        Modifier.flames(state == 0).chill(state == 1).tug(state == 2),
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (state != 1) Text(stringResource(Res.string.state_heating), style = MaterialTheme.typography.headlineMediumEmphasized)
+            if (state != 0) Text(stringResource(Res.string.ac_cooling_to, 24), style = MaterialTheme.typography.headlineMediumEmphasized)
+        }
+    }
+}
 
 @Composable
 internal fun ScheduleTip(onDismiss: () -> Unit, onOpenSchedule: () -> Unit) {

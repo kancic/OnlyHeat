@@ -116,7 +116,7 @@ internal suspend fun HttpClient.nameOf(host: String): String? = dashboardPage(ho
 internal suspend fun HttpClient.hasDashboard(host: String, expectedName: String? = null): Boolean =
     dashboardPage(host)?.let { expectedName == null || dashboardName(it) == expectedName } == true
 
-private suspend fun lanHosts(exclude: String? = null): List<String> {
+internal suspend fun lanHosts(exclude: String? = null): List<String> {
     val addrs = attempt { localIpv4s() }.getOrElse { log("cannot list network interfaces", it); emptyList() }
     return scanHosts(addrs).filter { it != exclude }
 }
