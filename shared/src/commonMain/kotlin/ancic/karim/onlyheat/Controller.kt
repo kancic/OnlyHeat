@@ -41,6 +41,7 @@ private data class PinPrompt(
 @Composable
 fun ControllerTab(
     device: String?, host: String, requestLocalNetwork: suspend () -> Boolean,
+    hasLocalNetwork: () -> Boolean?, // without asking; null when the platform can't tell
     cloudStatus: suspend () -> Throwable?, // null when the cloud can reach the controller right now
     snackbar: SnackbarHostState, backgroundAlerts: ((Boolean) -> Unit)?, onRestarted: () -> Unit,
     onLogout: () -> Unit, openSchedule: () -> Unit,
@@ -54,9 +55,8 @@ fun ControllerTab(
     var savedController by remember { mutableStateOf(settings.savedLanTarget()?.name) }
     var choosing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    var firmwareSeen by remember { mutableIntStateOf(0) } // bumped after anything that may have read the version
-    val firmware = remember(firmwareSeen) { settings.getStringOrNull(FIRMWARE) }
-    val firmwareBefore = remember(firmwareSeen) { settings.getStringOrNull(FIRMWARE_BEFORE) }
+    val firmware = remember(firmwareRevision) { settings.getStringOrNull(FIRMWARE) }
+    val firmwareBefore = remember(firmwareRevision) { settings.getStringOrNull(FIRMWARE_BEFORE) }
 
     /** Stages the verified controller for PIN entry. null: the user cancelled discovery. */
     suspend fun chooseController(onSaved: () -> Unit = {}, onEditPin: (() -> Unit)? = null): Boolean? {
@@ -141,14 +141,13 @@ fun ControllerTab(
                 stringResource(Res.string.firmware_changed_desc, firmwareBefore, firmware),
                 modifier = Modifier.springIn(0), container = MaterialTheme.colorScheme.errorContainer,
             ) {
-                TextButton({ settings.remove(FIRMWARE_BEFORE); firmwareSeen++ }, shapes = ButtonDefaults.shapes()) {
+                TextButton({ settings.closeFirmwareChange() }, shapes = ButtonDefaults.shapes()) {
                     Text(stringResource(Res.string.ok))
                 }
             }
 
             DiagnosticsCard(
                 Modifier.springIn(0), host, settings, { chooseController(it) }, requestLocalNetwork, cloudStatus, localAccessBusy,
-                onChecked = { firmwareSeen++ },
             ) {
                 confirmRestart = true
             }
@@ -167,6 +166,12 @@ fun ControllerTab(
                 }
             }
 
+            val p = pin
+            if (p != null && savedController != null) key(savedController, p) {
+                AutoUpdateCard(Modifier.springIn(4), host, p, settings, snackbar, requestLocalNetwork, hasLocalNetwork,
+                    wrongPin = { savePin(settings, null); pin = null }) { controllerPicker.ask() }
+            }
+
             // One card for the controller and its dashboard PIN: picking another controller asks for its PIN too.
             Section(
                 stringResource(Res.string.local_access_title),
@@ -176,7 +181,7 @@ fun ControllerTab(
                     stringResource(Res.string.dashboard_pin) + ": " +
                         stringResource(if (pin != null) Res.string.pin_saved else Res.string.pin_not_set),
                 ).joinToString("\n"),
-                modifier = Modifier.springIn(4),
+                modifier = Modifier.springIn(5),
             ) {
                 TextButton({
                     scope.launch {
@@ -194,7 +199,7 @@ fun ControllerTab(
 
             val tipsAgain = stringResource(Res.string.tips_again_done)
             Section(
-                stringResource(Res.string.account), stringResource(Res.string.account_desc), modifier = Modifier.springIn(5),
+                stringResource(Res.string.account), stringResource(Res.string.account_desc), modifier = Modifier.springIn(6),
                 below = {
                     TextButton({ resetTips(settings); scope.launch { snackbar.showSnackbar(tipsAgain) } }) {
                         Text(stringResource(Res.string.tips_again))
@@ -423,6 +428,54 @@ private fun AlertsCard(modifier: Modifier, settings: Settings, enable: (Boolean)
     }
 }
 
+/** The controller's own "install new versions automatically at night". Read on opening (it logs in, which also
+ *  notes the firmware); hidden while unknown or on firmware without the setting. The cache is per controller
+ *  (callers key the card by it), since another controller's value would be wrong. */
+@Composable
+private fun AutoUpdateCard(
+    modifier: Modifier, host: String, pin: String, settings: Settings, snackbar: SnackbarHostState,
+    requestLocalNetwork: suspend () -> Boolean, hasLocalNetwork: () -> Boolean?, wrongPin: () -> Unit, ask: suspend () -> DashboardTarget?,
+) {
+    val cacheKey = "controllerAutoUpdate." + settings.savedLanTarget()?.name
+    var on by remember { mutableStateOf(if (settings.hasKey(cacheKey)) settings.getBoolean(cacheKey, true) else null) }
+    var busy by remember { mutableStateOf(false) }
+    var touched by remember { mutableStateOf(false) } // flipped here: a read that started earlier is stale
+    val scope = rememberCoroutineScope()
+    suspend fun failed(e: Throwable) {
+        if (e is WrongDashboardPin) wrongPin()
+        snackbar.showSnackbar(errorText(e))
+    }
+    LaunchedEffect(Unit) {
+        // Opening the tab must not ask for anything: no permission dialog, no controller picker.
+        if (hasLocalNetwork() != true) return@LaunchedEffect
+        attempt { LocalApi(host, pin, settings) { null }.autoUpdate() }.onSuccess { value ->
+            if (touched) return@onSuccess
+            on = value
+            if (value == null) settings.remove(cacheKey) else settings.putBoolean(cacheKey, value)
+        }.onFailure { if (it is WrongDashboardPin) failed(it) } // unreachable: keep the last known value quietly
+    }
+    val value = on ?: return
+    Section(stringResource(Res.string.auto_update_title), stringResource(Res.string.auto_update_desc), modifier = modifier) {
+        Switch(value, { wanted ->
+            touched = true
+            busy = true
+            on = wanted
+            scope.launch {
+                try {
+                    if (!requestLocalNetwork()) {
+                        on = !wanted; snackbar.showSnackbar(getString(Res.string.local_permission_denied)); return@launch
+                    }
+                    attempt { LocalApi(host, pin, settings, ask).setAutoUpdate(wanted) }
+                        .onSuccess { settings.putBoolean(cacheKey, wanted) }
+                        .onFailure { on = !wanted; failed(it) }
+                } finally {
+                    busy = false
+                }
+            }
+        }, enabled = !busy)
+    }
+}
+
 @Composable
 private fun PinDialog(onDismiss: () -> Unit, onPin: (String) -> Unit) {
     var value by remember { mutableStateOf("") }
@@ -446,7 +499,7 @@ private enum class Link { Unknown, Ok, Unverified, Down, NoInternet }
 private fun DiagnosticsCard(
     modifier: Modifier, host: String, settings: Settings, chooseController: suspend (() -> Unit) -> Boolean?,
     requestLocalNetwork: suspend () -> Boolean, cloudStatus: suspend () -> Throwable?,
-    localAccessBusy: Boolean, onChecked: () -> Unit, onRestart: () -> Unit,
+    localAccessBusy: Boolean, onRestart: () -> Unit,
 ) {
     var cloud by remember { mutableStateOf(Link.Unknown) }
     var local by remember { mutableStateOf(Link.Unknown) }
@@ -478,7 +531,6 @@ private fun DiagnosticsCard(
             }
             log("diagnostics: cloud=$cloud local=$local ($host)")
             running = false
-            onChecked()
         }
     }
 

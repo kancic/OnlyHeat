@@ -27,7 +27,10 @@ class HeatWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             attempt { syncHistory(api, history, it, settings) } // no-op unless 6 h have passed
                 .onFailure { android.util.Log.w("OnlyHeat", "history sync failed", it) }
         }
-        if (alertsEnabled(settings)) checkAlerts(api, settings).forEach { applicationContext.notifyHeat(it.text, alert = true, acLinks = it.acLinks) }
+        if (alertsEnabled(settings)) checkAlerts(api, settings).forEach {
+            val posted = applicationContext.notifyHeat(it.text, alert = true, acLinks = it.acLinks)
+            if (posted) it.firmware?.let { v -> markFirmwareNotified(settings, v) }
+        }
         val boostsDone = attempt { endExpiredBoosts(api, savedAuthKey(settings), settings) }
             .onFailure { android.util.Log.w("OnlyHeat", "ending boosts failed", it) }.isSuccess
         refreshWidgets(applicationContext)

@@ -104,6 +104,8 @@
     <string name="schedule_card_desc">Odredite kada soba drži zadanu temperaturu.</string>
     <string name="restart_card_title">Ponovno pokretanje regulatora</string>
     <string name="restart_card_desc">Koristite kada regulator prestane reagirati, umjesto isključivanja na osiguraču.</string>
+    <string name="auto_update_title">Automatsko ažuriranje firmvera</string>
+    <string name="auto_update_desc">Regulator noću sam instalira nove verzije. Ažuriranje može onemogućiti raspored, ponovno pokretanje ili pronalaženje regulatora dok se OnlyHeat ne ažurira.</string>
     <string name="controller_local_only">Raspored i ponovno pokretanje rade samo dok je mobitel na Wi-Fi mreži regulatora ili na kućnoj Wi-Fi mreži na koju je regulator spojen.</string>
     <string name="pin_saved">Spremljen</string>
     <string name="pin_not_set">Nije postavljen</string>
@@ -170,6 +172,7 @@
     <string name="alert_not_warming">%1$s: već 2 sata nema zagrijavanja, %2$s° uz postavljenih %3$s°. Radi li radijator ili ventil?</string>
     <string name="alert_too_hot">%1$s: %2$s° uz postavljenih %3$s°, a i dalje se grije. Je li ventil zapeo otvoren?</string>
     <string name="alert_use_ac">Prevruće je u: %1$s, a vani je %2$s°. Uključiti klimu?</string>
+    <string name="alert_firmware">Regulator je ažurirao firmver s %1$s na %2$s. Ako raspored, ponovno pokretanje ili pronalaženje regulatora prestanu raditi, ažurirajte OnlyHeat.</string>
     <plurals name="rooms">
         <item quantity="one">%1$d soba</item>
         <item quantity="few">%1$d sobe</item>

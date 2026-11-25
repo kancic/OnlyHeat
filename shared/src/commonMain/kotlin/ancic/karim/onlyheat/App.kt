@@ -243,7 +243,11 @@ internal class HomeModel(
         operationNotices = loadOperationNotices(settings)
     }
 
+    /** The controller's firmware changed (from, to), until closed here or on the Controller screen. */
+    val firmwareChange get() = firmwareRevision.let { firmwareChange(settings) }
+
     fun close(key: String) = when {
+        key == "firmware" -> settings.closeFirmwareChange()
         key.startsWith("write-") -> writeNotice(key.removePrefix("write-"), null)
         key.startsWith("operation-") -> operationNotice(OperationNotice.valueOf(key.removePrefix("operation-")), null)
         else -> saveClosed(closed + key)
@@ -622,6 +626,7 @@ private fun Main(
                                 key,
                                 host,
                                 requestLocalNetwork,
+                                hasLocalNetwork,
                                 discoverAc = if (lanAvailable ?: acs.lanScanSucceeded) null else {
                                     { acs.discover { requestLocalNetwork().also { lanAvailable = hasLocalNetwork() } } }
                                 },
@@ -704,6 +709,7 @@ private fun MainTabs(
     key: String,
     host: String,
     requestLocalNetwork: suspend () -> Boolean,
+    hasLocalNetwork: () -> Boolean?,
     discoverAc: (() -> Unit)?,
     backgroundAlerts: ((Boolean) -> Unit)?,
     onLogout: () -> Unit,
@@ -737,6 +743,7 @@ private fun MainTabs(
                         model.home?.device,
                         host,
                         requestLocalNetwork,
+                        hasLocalNetwork,
                         cloudStatus = { attempt { api.home(key) }.exceptionOrNull() },
                         snackbar = model.snackbar,
                         backgroundAlerts = backgroundAlerts,

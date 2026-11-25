@@ -70,4 +70,10 @@ class ScheduleTest {
         assertEquals(controllerSchedule.entries, editor.saved.value)
         assertEquals(original.entries, editor.entries.toList())
     }
+
+    @Test fun parseAutoUpdateSwitch() {
+        assertEquals(true, parseAutoUpdate("""<input type="checkbox" class="form-check-input" id="autoUpdateSwitch" checked>"""))
+        assertEquals(false, parseAutoUpdate("""<input type="checkbox" class="form-check-input" id="autoUpdateSwitch">"""))
+        assertEquals(null, parseAutoUpdate("<p>Checking for updates</p>")) // firmware without the setting
+    }
 }

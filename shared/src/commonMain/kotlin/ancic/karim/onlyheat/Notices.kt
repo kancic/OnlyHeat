@@ -242,6 +242,10 @@ internal fun roomNotices(
             }
         }
     }
+    model.firmwareChange?.let { (old, new) ->
+        list += Notice("firmware", Level.Info, stringResource(Res.string.firmware_changed_desc, old, new),
+            stringResource(Res.string.firmware_changed_title), TuneIcon)
+    }
     if (h != null && h.rooms.isNotEmpty()) {
         val found = acs.found.firstOrNull()
         // Found can be minimized but not closed: closing would lose the AC until it drops off the network.

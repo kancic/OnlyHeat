@@ -1,5 +1,8 @@
 package ancic.karim.onlyheat
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import com.russhwolf.settings.Settings
 import io.ktor.client.HttpClient
 import io.ktor.client.HttpClientConfig
@@ -58,13 +61,37 @@ internal fun dashboardFirmware(html: String): String? = dashboardFirmware.find(h
 
 internal const val FIRMWARE = "controllerFirmware"
 internal const val FIRMWARE_BEFORE = "controllerFirmwareBefore" // set when the version changed, until dismissed
+private const val FIRMWARE_NOTIFIED = "controllerFirmwareNotified" // the version a notification was posted for
 
-/** The controller installs updates by itself at night: remember the version and note when it changes. */
+/** Bumped whenever the stored firmware state changes, so every screen showing it recomposes. */
+internal var firmwareRevision by mutableIntStateOf(0)
+    private set
+
+/** The controller installs updates by itself at night: remember the version and note when it changes.
+ *  The version the user last saw stays as "before" through further updates until the notice is closed. */
 internal fun Settings.noteFirmware(version: String) {
     val old = getStringOrNull(FIRMWARE)
-    if (old != null && old != version) putString(FIRMWARE_BEFORE, old)
+    if (old == version) return
+    val before = getStringOrNull(FIRMWARE_BEFORE) ?: old
+    if (before == null || before == version) remove(FIRMWARE_BEFORE) else putString(FIRMWARE_BEFORE, before)
     putString(FIRMWARE, version)
+    firmwareRevision++
 }
+
+internal fun Settings.closeFirmwareChange() {
+    remove(FIRMWARE_BEFORE)
+    firmwareRevision++
+}
+
+/** (from, to) while a firmware change hasn't been closed. */
+internal fun firmwareChange(s: Settings): Pair<String, String>? =
+    s.getStringOrNull(FIRMWARE_BEFORE)?.let { old -> s.getStringOrNull(FIRMWARE)?.let { old to it } }
+
+/** The open firmware change, unless a notification was already posted for its version. */
+internal fun unnotifiedFirmwareChange(s: Settings) =
+    firmwareChange(s)?.takeIf { (_, new) -> s.getStringOrNull(FIRMWARE_NOTIFIED) != new }
+
+fun markFirmwareNotified(s: Settings, version: String) = s.putString(FIRMWARE_NOTIFIED, version)
 
 /** Thermal Intelligence (formerly "Smart Heating") needs AccuWeather, which only works since 1.0.9.2.0.
  *  Unknown firmware counts as new: the controller auto-updates. */
@@ -108,6 +135,18 @@ private suspend fun HttpClient.dashboardPage(host: String): String? {
         get("http://$host/dashboard") { timeout { requestTimeoutMillis = 3_000 } }
             .let { if (it.status.isSuccess()) it.bodyAsText().takeIf(::looksLikeDashboard) else null }
     }.getOrNull()
+}
+
+/** The saved controller's firmware, read from its login page while the phone is on Wi-Fi with it; null otherwise. */
+internal suspend fun savedControllerFirmware(settings: Settings): String? {
+    val saved = settings.savedLanTarget() ?: return null
+    val connection = currentLanConnection() ?: return null // not on Wi-Fi: it can't be reached
+    return dashboardProbeClient(connection).use { client ->
+        // The home address is saved when known; on the controller's own Wi-Fi it is at the hotspot address.
+        listOf(saved.host, HOTSPOT).distinct().firstNotNullOfOrNull { host ->
+            client.dashboardPage(host)?.takeIf { dashboardName(it) == saved.name }?.let(::dashboardFirmware)
+        }
+    }
 }
 
 internal suspend fun HttpClient.firmwareOf(host: String): String? = dashboardPage(host)?.let(::dashboardFirmware)

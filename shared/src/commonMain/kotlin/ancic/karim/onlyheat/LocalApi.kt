@@ -139,6 +139,22 @@ class LocalApi(
         attempt { readSchedule(base) }.onFailure { log("schedule read-back failed", it) }.getOrNull()
     }
 
+    /** Whether the controller installs new firmware by itself at night; null when its firmware has no such setting. */
+    suspend fun autoUpdate(): Boolean? = withController {
+        val response = get("http://${it.host}/include/modals/modal-update.php")
+        // A redirect or error page isn't "no such setting".
+        if (!response.status.isSuccess()) throw ApiException("Update settings unavailable (${response.status.value})")
+        parseAutoUpdate(response.bodyAsText())
+    }
+
+    suspend fun setAutoUpdate(on: Boolean) = withController {
+        val response = submitForm("http://${it.host}/include/ajax/change-auto-update.php", parameters {
+            append("autoUpdate", if (on) "1" else "0")
+        })
+        val result = if (response.status.isSuccess()) attempt { Json.parseToJsonElement(response.bodyAsText()).jsonObject }.getOrNull() else null
+        if (result?.str("type") != "success") throw ApiException(result?.str("message") ?: "Save failed")
+    }
+
     /** Sends one reboot. Either path can confirm recovery once it has observed a loss. */
     suspend fun rebootAndWait(cloudUp: suspend () -> Boolean): Boolean {
         val target = withController { target ->
@@ -213,6 +229,10 @@ internal fun weatherEmoji(icon: Int): String? = when (icon) {
     35, 36, 37 -> "☁️"
     else -> null
 }
+
+// The Update dialog's "Install new versions automatically at night" checkbox (since firmware 1.0.9.2.0).
+internal fun parseAutoUpdate(html: String): Boolean? =
+    Regex("""<input\b[^>]*id="autoUpdateSwitch"[^>]*>""").find(html)?.value?.let { Regex("""\schecked\b""").containsMatchIn(it) }
 
 internal fun parseApiPin(html: String): String? =
     Regex("""id="apiPin"\s*>\s*(\w+)\s*<""").find(html)?.groupValues?.get(1)

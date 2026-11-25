@@ -222,8 +222,9 @@ internal fun isCold(room: Room, s: Settings): Boolean = coldLimit(s).let { it !=
 
 fun alertsEnabled(s: Settings) = s.getBoolean("alerts.on", false)
 
-/** A notification to post; [acLinks] identify the pairings it can offer to turn on. */
-data class AlertNote(val text: String, val acLinks: List<String> = emptyList())
+/** A notification to post; [acLinks] identify the pairings it can offer to turn on. Once a [firmware] note is
+ *  posted, pass its version to [markFirmwareNotified]: until then every check offers it again. */
+data class AlertNote(val text: String, val acLinks: List<String> = emptyList(), val firmware: String? = null)
 
 /** One background check: returns what to notify. Called by the Android worker every ~20 minutes. */
 suspend fun checkAlerts(api: HeatApi, s: Settings): List<AlertNote> = checkAlerts(api, s, ::acTipState)
@@ -264,7 +265,13 @@ internal suspend fun checkAlerts(api: HeatApi, s: Settings, readAc: suspend (Lin
     }
     if (savedAuthKey(s) != key) return emptyList()
     saveWatch(s, next.copy(warm = next.warm - suppressed))
-    return notes
+    // The controller updates itself at night; it can only be asked while the phone is on its Wi-Fi.
+    savedControllerFirmware(s)?.let { s.noteFirmware(it) }
+    // Also a change the app noticed first (it reads the version whenever it talks to the controller).
+    val firmware = unnotifiedFirmwareChange(s)?.let { (old, new) ->
+        AlertNote(getString(Res.string.alert_firmware, old, new), firmware = new)
+    }
+    return notes + listOfNotNull(firmware)
 }
 
 private suspend fun alertText(a: Alert) = when (a) {

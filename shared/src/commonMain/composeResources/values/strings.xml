@@ -104,6 +104,8 @@
     <string name="schedule_card_desc">Set when each room holds a fixed temperature.</string>
     <string name="restart_card_title">Restart controller</string>
     <string name="restart_card_desc">Use this when the controller stops responding, instead of switching it off at the breaker.</string>
+    <string name="auto_update_title">Automatic firmware updates</string>
+    <string name="auto_update_desc">The controller installs new versions by itself at night. An update can stop the schedule, restart or finding the controller from working until OnlyHeat is updated.</string>
     <string name="controller_local_only">Schedule and restart work only while your phone is on the Wi-Fi of the controller, or on the home Wi-Fi the controller is connected to.</string>
     <string name="pin_saved">Saved</string>
     <string name="pin_not_set">Not set</string>
@@ -170,6 +172,7 @@
     <string name="alert_not_warming">%1$s hasn't warmed up in 2 hours: %2$s° with %3$s° set. Is the radiator or valve working?</string>
     <string name="alert_too_hot">%1$s is at %2$s° with %3$s° set and still heating. Is the valve stuck open?</string>
     <string name="alert_use_ac">Too warm in %1$s and %2$s° outside. Turn on the air conditioning?</string>
+    <string name="alert_firmware">The controller updated its firmware from %1$s to %2$s. If the schedule, restart or finding the controller stop working, update OnlyHeat.</string>
     <plurals name="rooms">
         <item quantity="one">%1$d room</item>
         <item quantity="other">%1$d rooms</item>

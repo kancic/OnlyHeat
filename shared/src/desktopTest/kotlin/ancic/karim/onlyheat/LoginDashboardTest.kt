@@ -67,4 +67,26 @@ class LoginDashboardTest {
             node.removeNode()
         }
     }
+
+    @Test fun firmwareChangeIsReportedOnce() {
+        val node = Preferences.userRoot().node("onlyheat-test-${UUID.randomUUID()}")
+        try {
+            val settings = PreferencesSettings(node)
+            settings.noteFirmware("1.0.7.0.8")
+            assertNull(firmwareChange(settings)) // first sighting is not a change
+            settings.noteFirmware("1.0.9.2.0")
+            assertEquals("1.0.7.0.8" to "1.0.9.2.0", unnotifiedFirmwareChange(settings))
+            markFirmwareNotified(settings, "1.0.9.2.0")
+            assertNull(unnotifiedFirmwareChange(settings)) // the next check doesn't notify again
+            settings.noteFirmware("1.0.9.3.0") // a second update before the notice is closed
+            assertEquals("1.0.7.0.8" to "1.0.9.3.0", unnotifiedFirmwareChange(settings))
+            settings.noteFirmware("1.0.7.0.8") // rolled back to what the user last saw: nothing changed
+            assertNull(firmwareChange(settings))
+            settings.noteFirmware("1.0.9.2.0")
+            settings.closeFirmwareChange()
+            assertNull(firmwareChange(settings))
+        } finally {
+            node.removeNode()
+        }
+    }
 }
