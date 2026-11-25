@@ -1,7 +1,10 @@
 package ancic.karim.onlyheat
 
 import ancic.karim.onlyheat.res.*
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.InputTransformation
@@ -17,6 +20,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.graphics.shapes.RoundedPolygon
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.input.KeyboardType
@@ -37,7 +43,7 @@ private data class PinPrompt(
     val onSaved: () -> Unit = {},
 )
 
-/** Controller tab: things that talk to the controller's local dashboard, plus the account. */
+/** Settings tab: the controller (cloud check and its local dashboard), then app settings and the account. */
 @Composable
 fun ControllerTab(
     device: String?, host: String, requestLocalNetwork: suspend () -> Boolean,
@@ -56,7 +62,6 @@ fun ControllerTab(
     var choosing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val firmware = remember(firmwareRevision) { settings.getStringOrNull(FIRMWARE) }
-    val firmwareBefore = remember(firmwareRevision) { settings.getStringOrNull(FIRMWARE_BEFORE) }
 
     /** Stages the verified controller for PIN entry. null: the user cancelled discovery. */
     suspend fun chooseController(onSaved: () -> Unit = {}, onEditPin: (() -> Unit)? = null): Boolean? {
@@ -119,7 +124,7 @@ fun ControllerTab(
         modifier = Modifier.collapsing(scroll),
         topBar = {
             LargeFlexibleTopAppBar(
-                title = { Text(stringResource(Res.string.tab_controller)) },
+                title = { Text(stringResource(Res.string.tab_settings)) },
                 subtitle = { if (device != null) Text(device) },
                 scrollBehavior = scroll,
             )
@@ -130,46 +135,18 @@ fun ControllerTab(
             Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).wrapContentWidth().widthIn(max = 640.dp).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
           ) {
-            Text(
-                stringResource(Res.string.controller_local_only),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            SectionHeading(stringResource(Res.string.tab_controller), stringResource(Res.string.controller_local_only))
 
-            if (firmwareBefore != null && firmware != null) Section(
-                stringResource(Res.string.firmware_changed_title),
-                stringResource(Res.string.firmware_changed_desc, firmwareBefore, firmware),
-                modifier = Modifier.springIn(0), container = MaterialTheme.colorScheme.errorContainer,
-            ) {
-                TextButton({ settings.closeFirmwareChange() }, shapes = ButtonDefaults.shapes()) {
-                    Text(stringResource(Res.string.ok))
-                }
-            }
-
+            Group {
             DiagnosticsCard(
                 Modifier.springIn(0), host, settings, { chooseController(it) }, requestLocalNetwork, cloudStatus, localAccessBusy,
             ) {
                 confirmRestart = true
             }
 
-            if (backgroundAlerts != null) AlertsCard(Modifier.springIn(1), settings, backgroundAlerts)
-
-            Section(stringResource(Res.string.schedule_title), stringResource(Res.string.schedule_card_desc), onClick = openSchedule,
-                modifier = Modifier.springIn(2).shared("schedule"), container = MaterialTheme.colorScheme.tertiaryContainer) {
-                Text("›", style = MaterialTheme.typography.headlineMedium)
-            }
-
-            Section(stringResource(Res.string.restart_card_title), stringResource(Res.string.restart_card_desc), modifier = Modifier.springIn(3), container = MaterialTheme.colorScheme.primaryContainer) {
-                FilledTonalButton({ confirmRestart = true }, enabled = !localAccessBusy, shapes = ButtonDefaults.shapes(),
-                    colors = onCardTonal()) {
-                    Text(stringResource(Res.string.restart))
-                }
-            }
-
-            val p = pin
-            if (p != null && savedController != null) key(savedController, p) {
-                AutoUpdateCard(Modifier.springIn(4), host, p, settings, snackbar, requestLocalNetwork, hasLocalNetwork,
-                    wrongPin = { savePin(settings, null); pin = null }) { controllerPicker.ask() }
+            Section(stringResource(Res.string.schedule_title), stringResource(Res.string.schedule_card_desc), ScheduleIcon,
+                MaterialShapes.Clover4Leaf, accent = 1, onClick = openSchedule, modifier = Modifier.springIn(1).shared("schedule", groupShape())) {
+                Icon(ChevronRightIcon, null)
             }
 
             // One card for the controller and its dashboard PIN: picking another controller asks for its PIN too.
@@ -181,9 +158,10 @@ fun ControllerTab(
                     stringResource(Res.string.dashboard_pin) + ": " +
                         stringResource(if (pin != null) Res.string.pin_saved else Res.string.pin_not_set),
                 ).joinToString("\n"),
-                modifier = Modifier.springIn(5),
+                LockIcon, MaterialShapes.Cookie6Sided, accent = 2,
+                modifier = Modifier.springIn(2),
             ) {
-                TextButton({
+                FilledTonalButton({
                     scope.launch {
                         val editPin: (() -> Unit)? = if (savedController != null || pin != null) {
                             { pinPrompt = PinPrompt() }
@@ -192,21 +170,44 @@ fun ControllerTab(
                             snackbar.showSnackbar(getString(Res.string.schedule_unreachable))
                         }
                     }
-                }, enabled = !localAccessBusy, shapes = ButtonDefaults.shapes()) {
+                }, enabled = !localAccessBusy, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) {
                     Text(stringResource(Res.string.change))
                 }
             }
 
+            val p = pin
+            if (p != null && savedController != null) key(savedController, p) {
+                AutoUpdateCard(Modifier.springIn(3), host, p, settings, snackbar, requestLocalNetwork, hasLocalNetwork,
+                    wrongPin = { savePin(settings, null); pin = null }) { controllerPicker.ask() }
+            }
+
+            Section(stringResource(Res.string.restart_card_title), stringResource(Res.string.restart_card_desc), RefreshIcon,
+                MaterialShapes.Cookie4Sided, accent = 1, modifier = Modifier.springIn(4), shape = groupShape(last = true)) {
+                FilledTonalButton({ confirmRestart = true }, enabled = !localAccessBusy, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) {
+                    Text(stringResource(Res.string.restart))
+                }
+            }
+            }
+
+            SectionHeading(stringResource(Res.string.settings_app), modifier = Modifier.padding(top = 12.dp))
+
+            Group {
+            if (backgroundAlerts != null) AlertsCard(Modifier.springIn(5), settings, backgroundAlerts)
+
+            LimitsCard(Modifier.springIn(6), settings, alerts = backgroundAlerts != null)
+
             val tipsAgain = stringResource(Res.string.tips_again_done)
-            Section(
-                stringResource(Res.string.account), stringResource(Res.string.account_desc), modifier = Modifier.springIn(6),
-                below = {
-                    TextButton({ resetTips(settings); scope.launch { snackbar.showSnackbar(tipsAgain) } }) {
-                        Text(stringResource(Res.string.tips_again))
-                    }
-                },
-            ) {
-                OutlinedButton(onLogout, shapes = ButtonDefaults.shapes()) { Text(stringResource(Res.string.log_out)) }
+            Section(stringResource(Res.string.tips_title), stringResource(Res.string.tips_desc), LightbulbIcon,
+                MaterialShapes.Sunny, accent = 2, modifier = Modifier.springIn(7)) {
+                FilledTonalButton({ resetTips(settings); scope.launch { snackbar.showSnackbar(tipsAgain) } }, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) {
+                    Text(stringResource(Res.string.tips_again))
+                }
+            }
+
+            Section(stringResource(Res.string.account), stringResource(Res.string.account_desc), PersonIcon,
+                MaterialShapes.Circle, modifier = Modifier.springIn(8), shape = groupShape(last = true)) {
+                FilledTonalButton(onLogout, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) { Text(stringResource(Res.string.log_out)) }
+            }
             }
           }
     }
@@ -381,16 +382,67 @@ internal class LanControllerPicker(private val settings: Settings) {
 }
 
 @Composable
+private fun SectionHeading(title: String, text: String? = null, modifier: Modifier = Modifier) {
+    Column(modifier.padding(start = 4.dp, top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, style = MaterialTheme.typography.titleLargeEmphasized, color = MaterialTheme.colorScheme.primary)
+        if (text != null) Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** A section's cards joined into one block, Android 16 Settings style: thin gaps, see [groupShape]. */
+@Composable
+private fun Group(content: @Composable ColumnScope.() -> Unit) =
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp), content = content)
+
+/** Big corners on the group's outer edges, small ones where cards meet. */
+private fun groupShape(first: Boolean = false, last: Boolean = false): Shape {
+    val top = if (first) 28.dp else 6.dp
+    val bottom = if (last) 28.dp else 6.dp
+    return RoundedCornerShape(top, top, bottom, bottom)
+}
+
+/** Green "all good" card, like the status dots in [LinkRow]. */
+@Composable
+private fun goodColors(): Pair<Color, Color> =
+    if (isSystemInDarkTheme()) Color(0xFF1F3A21) to Color(0xFFB9E6BC) else Color(0xFFCDEBCF) to Color(0xFF0B2E10)
+
+/**
+ * A settings card. Color means state, never identity: neutral by default, [container] only while the card has
+ * something to say (a check's result; a switch shows its own state). Identity is the [icon] in its [badge] shape.
+ */
+@Composable
 private fun Section(
-    title: String, text: String, onClick: (() -> Unit)? = null, modifier: Modifier = Modifier,
-    container: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    title: String, text: String, icon: ImageVector, badge: RoundedPolygon,
+    accent: Int = 0, // the badge's color: 0 primary, 1 tertiary, 2 secondary; neighbours differ
+    onClick: (() -> Unit)? = null, modifier: Modifier = Modifier,
+    container: Color = MaterialTheme.colorScheme.surfaceContainerHigh, ink: Color = contentColorFor(container),
+    shape: Shape = groupShape(),
     below: (@Composable ColumnScope.() -> Unit)? = null, // extra content under the header row
     trailing: @Composable () -> Unit,
 ) {
-    val colors = CardDefaults.cardColors(containerColor = container)
+    val tinted = container != MaterialTheme.colorScheme.surfaceContainerHigh
+    val scheme = MaterialTheme.colorScheme
+    val (fill, onFill) = when (accent % 3) {
+        0 -> scheme.primary to scheme.onPrimary
+        1 -> scheme.tertiary to scheme.onTertiary
+        else -> scheme.secondary to scheme.onSecondary
+    }
+    val spec = MaterialTheme.motionScheme.defaultEffectsSpec<Color>()
+    val colors = CardDefaults.cardColors(
+        containerColor = animateColorAsState(container, spec).value, contentColor = animateColorAsState(ink, spec).value,
+    )
     val content: @Composable ColumnScope.() -> Unit = {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.align(Alignment.Top).size(40.dp).background( // beside the title, also on long cards
+                        if (tinted) ink.copy(alpha = 0.12f) else fill, badge.toShape(),
+                    ),
+                    Alignment.Center,
+                ) {
+                    Icon(icon, null, Modifier.size(22.dp), tint = if (tinted) ink else onFill)
+                }
+                Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
                     Text(title, style = MaterialTheme.typography.titleMediumEmphasized)
                     Text(text, style = MaterialTheme.typography.bodyMedium, color = LocalContentColor.current.copy(alpha = 0.8f))
@@ -401,19 +453,29 @@ private fun Section(
             below?.invoke(this)
         }
     }
-    if (onClick != null) PressCard(onClick, modifier.fillMaxWidth(), colors = colors, content = content)
-    else Card(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge, colors = colors, content = content)
+    if (onClick != null) PressCard(onClick, modifier.fillMaxWidth(), colors = colors, shape = shape, content = content)
+    else Card(modifier.fillMaxWidth(), shape = shape, colors = colors, content = content)
 }
 
 /** Background checks: controller offline, room too cold, open window, not warming up, too hot, AC tip. The check itself is in Watch.kt. */
 @Composable
 private fun AlertsCard(modifier: Modifier, settings: Settings, enable: (Boolean) -> Unit) {
     var on by remember { mutableStateOf(alertsEnabled(settings)) }
+    Section(stringResource(Res.string.alerts_title), stringResource(Res.string.alerts_desc), BellIcon, MaterialShapes.Clover8Leaf,
+        modifier = modifier, shape = groupShape(first = true)) {
+        Switch(on, { on = it; settings.putBoolean("alerts.on", it); enable(it) })
+    }
+}
+
+/** Always shown: Too warm also drives the AC tip and caps the AC's cooling, with alerts on or off. */
+@Composable
+private fun LimitsCard(modifier: Modifier, settings: Settings, alerts: Boolean) {
     var cold by remember { mutableStateOf(coldSetting(settings)) }
     var warm by remember { mutableStateOf(warmSetting(settings)) }
     Section(
-        stringResource(Res.string.alerts_title), stringResource(Res.string.alerts_desc), modifier = modifier,
-        below = if (on) {{
+        stringResource(Res.string.limits_title), stringResource(if (alerts) Res.string.limits_desc else Res.string.limits_desc_no_alerts),
+        ThermostatIcon, MaterialShapes.Pill, accent = 1, modifier = modifier, shape = groupShape(first = !alerts), // first when the Alerts card is hidden
+        below = {
             Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(Res.string.alerts_cold), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                 TempStepper(cold, { cold = it; settings.putDouble("alerts.cold", it) }, buttonSize = 44.dp)
@@ -422,10 +484,8 @@ private fun AlertsCard(modifier: Modifier, settings: Settings, enable: (Boolean)
                 Text(stringResource(Res.string.alerts_warm), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                 TempStepper(warm, { warm = it; settings.putDouble("alerts.warm", it) }, buttonSize = 44.dp)
             }
-        }} else null,
-    ) {
-        Switch(on, { on = it; settings.putBoolean("alerts.on", it); enable(it) })
-    }
+        },
+    ) {}
 }
 
 /** The controller's own "install new versions automatically at night". Read on opening (it logs in, which also
@@ -455,7 +515,8 @@ private fun AutoUpdateCard(
         }.onFailure { if (it is WrongDashboardPin) failed(it) } // unreachable: keep the last known value quietly
     }
     val value = on ?: return
-    Section(stringResource(Res.string.auto_update_title), stringResource(Res.string.auto_update_desc), modifier = modifier) {
+    Section(stringResource(Res.string.auto_update_title), stringResource(Res.string.auto_update_desc), DownloadIcon,
+        MaterialShapes.Sunny, modifier = modifier) {
         Switch(value, { wanted ->
             touched = true
             busy = true
@@ -545,9 +606,17 @@ private fun DiagnosticsCard(
         }
     }
 
+    // Tinted only once checked: green while the cloud works (away from home the local check failing is normal),
+    // red when nothing or only the local dashboard answers; an unverified dashboard is a question, not a result.
+    val (good, onGood) = goodColors()
+    val (container, ink) = when {
+        cloud == Link.Unknown || local == Link.Unverified -> MaterialTheme.colorScheme.surfaceContainerHigh.let { it to contentColorFor(it) }
+        cloud == Link.Ok -> good to onGood
+        else -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+    }
     Section(
-        stringResource(Res.string.diag_title), stringResource(Res.string.diag_desc), modifier = modifier,
-        container = MaterialTheme.colorScheme.secondaryContainer,
+        stringResource(Res.string.diag_title), stringResource(Res.string.diag_desc), WifiIcon, MaterialShapes.Cookie9Sided,
+        modifier = modifier, container = container, ink = ink, shape = groupShape(first = true),
         below = {
             if (cloud != Link.Unknown) {
                 LinkRow(stringResource(Res.string.diag_cloud), cloud)
@@ -566,14 +635,13 @@ private fun DiagnosticsCard(
                 Text(stringResource(verdict), style = MaterialTheme.typography.bodyLarge)
                 // Unverified too: the restart asks which controller it is.
                 if (cloud == Link.Down && local in setOf(Link.Ok, Link.Unverified)) FilledTonalButton(
-                    onRestart, enabled = !localAccessBusy && !running, shapes = ButtonDefaults.shapes(),
-                    colors = onCardTonal(),
+                    onRestart, enabled = !localAccessBusy && !running, shapes = ButtonDefaults.shapes(), colors = onCardTonal(),
                 ) { Text(stringResource(Res.string.restart)) }
             }
         },
     ) {
         if (running) LoadingIndicator(Modifier.size(40.dp))
-        else Button(::check, shapes = ButtonDefaults.shapes()) { Text(stringResource(Res.string.diag_run)) }
+        else FilledTonalButton(::check, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) { Text(stringResource(Res.string.diag_run)) }
     }
 }
 

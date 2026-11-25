@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
@@ -50,6 +51,7 @@ internal fun roomContainer(id: String): Color {
 @Composable
 internal fun PressCard(
     onClick: () -> Unit, modifier: Modifier = Modifier, colors: CardColors,
+    shape: Shape? = null, // fixed corners (a card inside a group); null: the corners tighten while pressed
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val source = remember { MutableInteractionSource() }
@@ -59,7 +61,7 @@ internal fun PressCard(
     val scale by animateFloatAsState(if (pressed) 0.97f else 1f, spec.fastSpatialSpec())
     Card(
         onClick, modifier.graphicsLayer { scaleX = scale; scaleY = scale },
-        shape = RoundedCornerShape(corner), colors = colors, interactionSource = source, content = content,
+        shape = shape ?: RoundedCornerShape(corner), colors = colors, interactionSource = source, content = content,
     )
 }
 

@@ -101,6 +101,8 @@
     <string name="restart_timeout">The app could not confirm that the controller came back. Check its connection and try diagnostics again.</string>
     <string name="tab_rooms">Rooms</string>
     <string name="tab_controller">Controller</string>
+    <string name="tab_settings">Settings</string>
+    <string name="settings_app">App</string>
     <string name="schedule_card_desc">Set when each room holds a fixed temperature.</string>
     <string name="restart_card_title">Restart controller</string>
     <string name="restart_card_desc">Use this when the controller stops responding, instead of switching it off at the breaker.</string>
@@ -165,7 +167,10 @@
     <string name="alerts_desc">Offline controller, cold or overheating rooms, open windows, AC tips. Checked every 20 min.</string>
     <string name="alerts_cold">Too cold</string>
     <string name="alerts_warm">Too warm</string>
-    <string name="alert_offline">The cloud lost contact with your heating controller. Open OnlyHeat → Controller → Connection check.</string>
+    <string name="limits_title">Room limits</string>
+    <string name="limits_desc">Below Too cold, rooms show frost and alerts warn you. Above Too warm, alerts warn you, the AC tip appears, and Turn on AC sets the AC at least a degree below it.</string>
+    <string name="limits_desc_no_alerts">Below Too cold, rooms show frost. Above Too warm, the AC tip appears, and Turn on AC sets the AC at least a degree below it.</string>
+    <string name="alert_offline">The cloud lost contact with your heating controller. Open OnlyHeat → Settings → Connection check.</string>
     <string name="alert_back_online">Your heating controller is back online.</string>
     <string name="alert_cold">%1$s is down to %2$s°.</string>
     <string name="alert_window">%1$s dropped %2$s° since the last check. Is a window open?</string>
@@ -182,7 +187,9 @@
     <string name="tip_next">Next</string>
     <string name="tip_done">Got it</string>
     <string name="tip_skip">Skip</string>
-    <string name="tips_again">Show tips again</string>
+    <string name="tips_title">Tips</string>
+    <string name="tips_desc">The short guide on the Rooms tab.</string>
+    <string name="tips_again">Show again</string>
     <string name="tips_again_done">Tips will show again on the Rooms tab.</string>
     <string name="tour_away_title">Leaving home?</string>
     <string name="tour_away">Away lowers room temperatures while you’re gone. Rooms that are off stay off, and rooms on a schedule may keep their current targets. “I’m back” restores the previous targets.</string>

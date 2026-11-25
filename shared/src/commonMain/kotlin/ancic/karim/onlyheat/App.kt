@@ -123,7 +123,7 @@ private val backStackSaver = listSaver<SnapshotStateList<Screen>, String>(
 private enum class Tab(val label: StringResource, val icon: ImageVector) {
     Rooms(Res.string.tab_rooms, HomeIcon),
     History(Res.string.history, ChartIcon),
-    Controller(Res.string.tab_controller, TuneIcon),
+    Controller(Res.string.tab_settings, TuneIcon),
 }
 
 /**
@@ -243,7 +243,7 @@ internal class HomeModel(
         operationNotices = loadOperationNotices(settings)
     }
 
-    /** The controller's firmware changed (from, to), until closed here or on the Controller screen. */
+    /** The controller's firmware changed (from, to), until closed here. */
     val firmwareChange get() = firmwareRevision.let { firmwareChange(settings) }
 
     fun close(key: String) = when {
@@ -684,12 +684,13 @@ private fun Main(
 
 internal val LocalSharedScope = staticCompositionLocalOf<SharedTransitionScope?> { null }
 
-/** Container transform: the element with the same [key] on the next screen grows out of this one. Only valid inside a NavEntry. */
+/** Container transform: the element with the same [key] on the next screen grows out of this one. Only valid inside a NavEntry.
+ *  [shape] is the card's own outline, so the transition clips it the way it is drawn. */
 @Composable
-internal fun Modifier.shared(key: String): Modifier {
+internal fun Modifier.shared(key: String, shape: Shape = MaterialTheme.shapes.extraLarge): Modifier {
     val scope = LocalSharedScope.current ?: return this
     val anim = LocalNavAnimatedContentScope.current
-    val clip = with(scope) { OverlayClip(MaterialTheme.shapes.extraLarge) }
+    val clip = with(scope) { OverlayClip(shape) }
     return with(scope) {
         sharedBounds(
             rememberSharedContentState(key), anim,

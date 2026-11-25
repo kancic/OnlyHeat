@@ -101,6 +101,8 @@
     <string name="restart_timeout">Aplikacija nije mogla potvrditi da je regulator ponovno dostupan. Provjerite njegovu vezu i ponovite dijagnostiku.</string>
     <string name="tab_rooms">Sobe</string>
     <string name="tab_controller">Regulator</string>
+    <string name="tab_settings">Postavke</string>
+    <string name="settings_app">Aplikacija</string>
     <string name="schedule_card_desc">Odredite kada soba drži zadanu temperaturu.</string>
     <string name="restart_card_title">Ponovno pokretanje regulatora</string>
     <string name="restart_card_desc">Koristite kada regulator prestane reagirati, umjesto isključivanja na osiguraču.</string>
@@ -165,7 +167,10 @@
     <string name="alerts_desc">Regulator bez veze, hladne ili pregrijane sobe, otvoreni prozori, savjet za klimu. Provjera svakih 20 min.</string>
     <string name="alerts_cold">Prehladno</string>
     <string name="alerts_warm">Pretoplo</string>
-    <string name="alert_offline">Oblak je izgubio vezu s regulatorom grijanja. Otvorite OnlyHeat → Regulator → Provjera veze.</string>
+    <string name="limits_title">Granice temperature</string>
+    <string name="limits_desc">Ispod Prehladno sobe prikazuju mraz i upozorenja vas obavještavaju. Iznad Pretoplo upozorenja vas obavještavaju, pojavljuje se savjet za klimu, a Uključi klimu postavlja klimu barem stupanj ispod te vrijednosti.</string>
+    <string name="limits_desc_no_alerts">Ispod Prehladno sobe prikazuju mraz. Iznad Pretoplo pojavljuje se savjet za klimu, a Uključi klimu postavlja klimu barem stupanj ispod te vrijednosti.</string>
+    <string name="alert_offline">Oblak je izgubio vezu s regulatorom grijanja. Otvorite OnlyHeat → Postavke → Provjera veze.</string>
     <string name="alert_back_online">Regulator grijanja ponovno je na vezi.</string>
     <string name="alert_cold">%1$s: temperatura je pala na %2$s°.</string>
     <string name="alert_window">%1$s: temperatura je od zadnje provjere pala za %2$s°. Je li otvoren prozor?</string>
@@ -183,7 +188,9 @@
     <string name="tip_next">Dalje</string>
     <string name="tip_done">Razumijem</string>
     <string name="tip_skip">Preskoči</string>
-    <string name="tips_again">Ponovno prikaži savjete</string>
+    <string name="tips_title">Savjeti</string>
+    <string name="tips_desc">Kratki vodič na kartici Sobe.</string>
+    <string name="tips_again">Prikaži ponovno</string>
     <string name="tips_again_done">Savjeti će se ponovno prikazati na kartici Sobe.</string>
     <string name="tour_away_title">Odlazite od kuće?</string>
     <string name="tour_away">Odsutnost snižava zadane temperature dok vas nema. Ako je grijanje u sobi već isključeno, tako i ostaje. Sobe s rasporedom mogu zadržati trenutačnu zadanu temperaturu. „Natrag sam” vraća prethodne zadane temperature.</string>
