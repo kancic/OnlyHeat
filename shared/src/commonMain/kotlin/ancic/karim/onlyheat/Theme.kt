@@ -139,6 +139,10 @@ internal val LightbulbIcon = icon(
     "Lightbulb",
     "M9,21c0,0.55 0.45,1 1,1h4c0.55,0 1,-0.45 1,-1v-1H9v1zM12,2C8.14,2 5,5.14 5,9c0,2.38 1.19,4.47 3,5.74V17c0,0.55 0.45,1 1,1h6c0.55,0 1,-0.45 1,-1v-2.26c1.81,-1.27 3,-3.36 3,-5.74 0,-3.86 -3.14,-7 -7,-7z",
 )
+internal val LuggageIcon = icon(
+    "Luggage",
+    "M17,6h-2V3c0,-0.55 -0.45,-1 -1,-1h-4C9.45,2 9,2.45 9,3v3H7C5.9,6 5,6.9 5,8v11c0,1.1 0.9,2 2,2c0,0.55 0.45,1 1,1s1,-0.45 1,-1h6c0,0.55 0.45,1 1,1s1,-0.45 1,-1c1.1,0 2,-0.9 2,-2V8C19,6.9 18.1,6 17,6zM9.5,18H8V9h1.5V18zM12.75,18h-1.5V9h1.5V18zM16,18h-1.5V9H16V18zM10.5,3.5h3V6h-3V3.5z",
+)
 internal val TuneIcon = icon(
     "Tune",
     "M3,17v2h6v-2H3zM3,5v2h10V5H3zm10,16v-2h8v-2h-8v-2h-2v6h2zM7,9v2H3v2h4v2h2V9H7zm14,4v-2H11v2h10zm-6,-4h2V7h4V5h-4V3h-2v6z",
@@ -208,7 +212,7 @@ internal fun TempStepper(
         Column(Modifier.widthIn(min = if (compact) 60.dp else 76.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             RollingTemp(
                 value, if (compact) MaterialTheme.typography.titleLargeEmphasized else MaterialTheme.typography.headlineSmallEmphasized,
-                color = MaterialTheme.colorScheme.primary,
+                color = content,
             )
             label?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
         }

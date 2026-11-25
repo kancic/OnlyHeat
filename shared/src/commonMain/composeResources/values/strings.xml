@@ -22,6 +22,7 @@
     <string name="outside">Outside %1$s°</string>
     <string name="heating_count">floor: %1$d heating</string>
     <string name="idle">floor idle</string>
+    <string name="status_idle">Idle</string>
     <string name="all_rooms">All rooms</string>
     <string name="set_all">Set all</string>
     <string name="all_set">All rooms set to %1$s°</string>
@@ -247,9 +248,11 @@
     <string name="ac_header_on">AC on</string>
     <string name="floor_heating">Floor heating</string>
     <string name="notice_window">%1$s is cooling down fast while it should heat. Is a window open?</string>
+    <string name="notices_title">Notifications</string>
     <string name="notice_notifications_off">Alerts are on, but notifications are off for OnlyHeat, so you won\'t see them.</string>
     <string name="notice_notifications_allow">Turn on</string>
     <string name="notice_open_room">Open room</string>
     <string name="ac_turn_on">Turn on AC</string>
     <string name="close">Close</string>
+    <string name="ac_mode">Mode</string>
 </resources>

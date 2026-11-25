@@ -22,8 +22,9 @@
     <string name="outside">Vani %1$s°</string>
     <string name="heating_count">pod: grije %1$d</string>
     <string name="idle">pod miruje</string>
+    <string name="status_idle">Miruje</string>
     <string name="all_rooms">Sve sobe</string>
-    <string name="set_all">Postavi sve</string>
+    <string name="set_all">Postavi</string>
     <string name="all_set">Sve sobe postavljene na %1$s°</string>
     <string name="no_rooms">Nema pronađenih soba.</string>
     <string name="retry">Pokušaj ponovno</string>
@@ -248,9 +249,11 @@
     <string name="ac_header_on">klima radi</string>
     <string name="floor_heating">Pod grije</string>
     <string name="notice_window">%1$s: temperatura brzo pada iako bi se trebalo grijati. Je li otvoren prozor?</string>
+    <string name="notices_title">Obavijesti</string>
     <string name="notice_notifications_off">Upozorenja su uključena, ali su obavijesti za OnlyHeat isključene pa ih nećete vidjeti.</string>
     <string name="notice_notifications_allow">Uključi</string>
     <string name="notice_open_room">Otvori prostoriju</string>
     <string name="ac_turn_on">Uključi klimu</string>
     <string name="close">Zatvori</string>
+    <string name="ac_mode">Način rada</string>
 </resources>

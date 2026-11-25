@@ -1,10 +1,15 @@
 package ancic.karim.onlyheat
 
+import androidx.graphics.shapes.RoundedPolygon
 import ancic.karim.onlyheat.res.*
 import androidx.compose.foundation.background
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -46,6 +51,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shape
@@ -895,10 +902,7 @@ private fun RoomsTab(
             },
         ) {
             when (val h = model.home) {
-                null if notices.isEmpty() -> Box(
-                    Modifier.fillMaxSize(),
-                    Alignment.Center
-                ) { LoadingIndicator(Modifier.size(64.dp)) }
+                null if notices.isEmpty() -> RoomsSkeleton()
                 // Adaptive: one column on a phone, two or more on wider windows.
                 // The app bar listens inside the refresh box, so a downward drag first expands the
                 // collapsed bar and only then pulls to refresh.
@@ -920,29 +924,36 @@ private fun RoomsTab(
                                 Modifier.springIn(0),
                             ) { model.comeBack { acs.setAway(false) } }
                         }
-                        if (h != null && h.rooms.size > 1 && !model.away) item {
-                            QuickCard(
-                                stringResource(Res.string.all_rooms),
-                                model.allTarget,
-                                { model.allTarget = it },
-                                stringResource(Res.string.set_all),
-                                Modifier.springIn(0)
-                            ) { model.setAll(model.allTarget) }
-                        }
-                        if (h != null && !model.away) item {
-                            QuickCard(
-                                stringResource(Res.string.away_title),
-                                model.awayTemp,
-                                { model.awayTemp = it },
-                                stringResource(Res.string.away_go),
-                                Modifier.springIn(1),
-                                model.awayBusy,
-                            ) { model.goAway { acs.setAway(true) } }
+                        // One block like the Settings tab's sections: All rooms (with more than one room) above Away.
+                        if (h != null && !model.away) item(span = span) {
+                            Group {
+                                if (h.rooms.size > 1) item("all") { QuickCard(
+                                    stringResource(Res.string.all_rooms), HomeIcon, MaterialShapes.Cookie9Sided, 0,
+                                    model.allTarget,
+                                    { model.allTarget = it },
+                                    stringResource(Res.string.set_all),
+                                    Modifier.springIn(0),
+                                ) { model.setAll(model.allTarget) } }
+                                item("away") { QuickCard(
+                                    stringResource(Res.string.away_title), LuggageIcon, MaterialShapes.Cookie6Sided, 1,
+                                    model.awayTemp,
+                                    { model.awayTemp = it },
+                                    stringResource(Res.string.away_go),
+                                    Modifier.springIn(1),
+                                    model.awayBusy,
+                                ) { model.goAway { acs.setAway(true) } } }
+                            }
                         }
                         // The notification area: errors, warnings, suggestions, most severe first (Notices.kt).
-                        notices.forEach { n ->
-                            item(span = span, key = n.key) {
-                                NoticeCard(n, Modifier.springIn(2), if (n.closable) ({ model.close(n.key) }) else null)
+                        // One block like a Settings section, so several notices read as one area.
+                        if (notices.isNotEmpty()) item(span = span, key = "notices") {
+                            Column {
+                                SectionHeading(stringResource(Res.string.notices_title), modifier = Modifier.padding(vertical = 12.dp))
+                                Group {
+                                    notices.forEach { n ->
+                                        item(n.key) { NoticeCard(n, Modifier.springIn(2), if (n.closable) ({ model.close(n.key) }) else null) }
+                                    }
+                                }
                             }
                         }
                         if (discoverAc != null && h != null && h.rooms.isNotEmpty() && acs.found.isEmpty() && "ac-discovery" in model.closed) {
@@ -954,7 +965,11 @@ private fun RoomsTab(
                                 }
                             }
                         }
-                        itemsIndexed(h?.rooms.orEmpty(), key = { _, r -> r.id }) { i, r ->
+                        // Like a Settings section heading: tells the rooms apart from the controls and notices above.
+                        if (h != null && h.rooms.isNotEmpty()) item(span = span, key = "rooms-heading") {
+                            SectionHeading(stringResource(Res.string.tab_rooms), modifier = Modifier.padding(top = 12.dp))
+                        }
+                        itemsIndexed(h?.rooms.orEmpty(), key = { _, r -> "room-${r.id}" }) { i, r ->
                             RoomCard(
                                 r,
                                 model.boosts.any { it.room == r.id },
@@ -981,6 +996,31 @@ private fun RoomsTab(
     ) {
         if (fighting(sheetRoom, sheetAc.state)) AcFightCard(sheetRoom, model.outside, { acs.set(sheetRoom.id, it) }, Modifier.padding(bottom = 8.dp), acs.busy(sheetRoom.id)) {
             model.heatingOff(sheetRoom, onScheduleLocked)
+        }
+    }
+}
+
+/** The Rooms tab's shape while the first load runs: All rooms / Away, the heading and three rooms, breathing. */
+@Composable
+private fun RoomsSkeleton() {
+    val pulse by rememberInfiniteTransition().animateFloat(
+        0.4f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse)
+    )
+    val color = MaterialTheme.colorScheme.surfaceContainerHigh
+    @Composable
+    fun Bone(height: Dp, index: Int, modifier: Modifier = Modifier, shape: Shape = LocalCardShape.current) =
+        Box(modifier.springIn(index).fillMaxWidth().height(height).graphicsLayer { alpha = pulse }.background(color, shape))
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.padding(cappedPadding(1200.dp)),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Group {
+                item("all") { Bone(88.dp, 0) }
+                item("away") { Bone(88.dp, 1) }
+            }
+            Bone(28.dp, 2, Modifier.padding(start = 4.dp, top = 20.dp).fillMaxWidth(0.3f), CircleShape)
+            repeat(3) { Bone(112.dp, it + 3) }
         }
     }
 }
@@ -1396,16 +1436,13 @@ private fun RoomCard(
     val asleep = !awake && !cold
     val spec = MaterialTheme.motionScheme.defaultEffectsSpec<Color>()
     // Off and asleep: a night-sky card in any theme, like the fire's fixed orange. Heating shows as fire on top.
+    val (roomContainer, roomContent) = roomColors(room.id)
     val container by animateColorAsState(
-        if (asleep) NightSky else if (awake) roomContainer(room.id) else scheme.surfaceContainerLow,
+        if (asleep) NightSky else if (awake) roomContainer else scheme.surfaceContainerLow,
         spec
     )
     val content by animateColorAsState(
-        if (asleep) NightInk else contentColorFor(
-            if (awake) roomContainer(
-                room.id
-            ) else scheme.surfaceContainerLow
-        ), spec
+        if (asleep) NightInk else if (awake) roomContent else contentColorFor(scheme.surfaceContainerLow), spec
     )
     PressCard(
         onOpen, modifier.fillMaxWidth().shared("room-${room.id}"),
@@ -1415,15 +1452,18 @@ private fun RoomCard(
         Column(
             Modifier.roomAnimations(
                 room, ac, cold, ink, boosted,
-                // With an AC the moon sleeps in the gap between the rows' names and switches, not on the Floor switch.
-                moon = if (ac == null) Offset(0.70f, 0.56f) else Offset(0.52f, 0.66f),
-                zTo = if (ac == null) Offset(0.86f, 0.48f) else Offset(0.66f, 0.5f),
-            ).padding(20.dp),
+                // The moon sleeps in the gap between the rows' names and switches, not on a switch.
+                moon = Offset(0.52f, if (ac == null) 0.5f else 0.66f),
+                zTo = if (ac == null) Offset(0.66f, 0.3f) else Offset(0.66f, 0.5f),
+            ).padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(room.name, style = MaterialTheme.typography.titleLargeEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    val working = active || acOn
                     val status = listOfNotNull(
+                        // Always a first word, so every card has the same rhythm: what works, else Idle or Off.
+                        if (!working) stringResource(if (on) Res.string.status_idle else Res.string.off) else null,
                         // With an AC say which one works: "Floor heating · AC cooling".
                         if (active) stringResource(if (ac == null) Res.string.status_heating else Res.string.floor_heating) else null,
                         if (acOn) acSummary(listOf(ac?.state)) else null,
@@ -1437,43 +1477,24 @@ private fun RoomCard(
                         if (room.schedule) stringResource(Res.string.schedule) else null,
                         if (boosted) stringResource(Res.string.boost) else null,
                     ).joinToString(" · ")
-                    if (status.isNotEmpty()) Text(
+                    Text(
                         status, style = MaterialTheme.typography.labelLarge,
-                        color = LocalContentColor.current.copy(alpha = if (active || acOn) 1f else 0.75f),
+                        color = LocalContentColor.current.copy(alpha = if (working) 1f else 0.75f),
                     )
                 }
-                // With an AC the switch moves into the heating row and the temperature takes its place, smaller.
-                if (ac == null) CardSwitch(on, onSwitch)
-                else RollingTemp(room.current, MaterialTheme.typography.displaySmall)
+                // One layout for every room: the temperature beside the name, then a row per device.
+                RollingTemp(room.current, MaterialTheme.typography.displaySmall)
             }
-            Spacer(Modifier.height(if (ac == null) 12.dp else 8.dp))
-            if (ac != null) {
-                // Like the AC's mode icon: a flame while heating, a thermostat while holding the target, a faded flame when off.
-                DeviceRow(
-                    floorIcon(on, active), stringResource(Res.string.heating_title), on, onSwitch,
-                    description = stringResource(if (active) Res.string.status_heating else if (on) Res.string.idle else Res.string.off),
-                ) {
-                    if (on) TempStepper(room.target, onTarget, compact = true, onLocked = onScheduleLocked.takeIf { room.schedule })
-                }
-                AcRow(ac, fighting(room, ac.state), onAcChange, onAcMore)
-            } else Row(verticalAlignment = Alignment.CenterVertically) {
-                RollingTemp(
-                    room.current,
-                    MaterialTheme.typography.displayMedium,
-                    Modifier.weight(1f)
-                )
-                if (on) TempStepper(
-                    room.target,
-                    onTarget,
-                    label = stringResource(Res.string.target),
-                    onLocked = onScheduleLocked.takeIf { room.schedule },
-                )
-                else Text(
-                    stringResource(Res.string.off),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = LocalContentColor.current.copy(alpha = 0.75f)
-                )
+            Spacer(Modifier.height(4.dp))
+            // Like the AC's mode icon: a flame while heating, a thermostat while holding the target, a faded flame when off.
+            DeviceRow(
+                floorIcon(on, active), stringResource(Res.string.heating_title), on, onSwitch,
+                // Without an AC the status line already says it; TalkBack shouldn't read it twice.
+                description = if (ac == null) null else stringResource(if (active) Res.string.status_heating else if (on) Res.string.idle else Res.string.off),
+            ) {
+                if (on) TempStepper(room.target, onTarget, compact = true, onLocked = onScheduleLocked.takeIf { room.schedule })
             }
+            if (ac != null) AcRow(ac, fighting(room, ac.state), onAcChange, onAcMore)
         }
     }
 }
@@ -1481,20 +1502,26 @@ private fun RoomCard(
 /** One-row card: a stepper labelled [title] and an action button. */
 @Composable
 private fun QuickCard(
-    title: String, t: Double, onChange: (Double) -> Unit, action: String, modifier: Modifier,
+    title: String, icon: ImageVector, badge: RoundedPolygon, accent: Int, t: Double, onChange: (Double) -> Unit, action: String, modifier: Modifier,
     busy: Boolean = false, onAction: () -> Unit,
 ) {
     Card(
         modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = LocalCardShape.current,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
     ) {
-        Row(
-            Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
+        // On narrow phones or with big fonts the button wraps below instead of squeezing its label.
+        FlowRow(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
         ) {
-            TempStepper(t, onChange, buttonSize = 40.dp, label = title)
-            Spacer(Modifier.weight(1f))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Badge(icon, badge, accent)
+                Spacer(Modifier.width(12.dp))
+                TempStepper(t, onChange, compact = true, label = title) // like the room cards
+            }
             FilledTonalButton(
                 onAction,
                 enabled = !busy,
@@ -1510,32 +1537,17 @@ private fun QuickCard(
     }
 }
 
+/** Away is on: a Settings-style card tinted while it lasts, color meaning state. */
 @Composable
 private fun AwayOnCard(temp: Double, busy: Boolean, modifier: Modifier, onBack: () -> Unit) {
-    Card(
-        modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+    Section(
+        stringResource(Res.string.away_on_title), stringResource(Res.string.away_on_desc, fmt1(temp)), LuggageIcon,
+        MaterialShapes.Cookie6Sided, modifier = modifier,
+        container = MaterialTheme.colorScheme.tertiaryContainer,
     ) {
-        Row(
-            Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    stringResource(Res.string.away_on_title),
-                    style = MaterialTheme.typography.titleMediumEmphasized
-                )
-                Text(
-                    stringResource(Res.string.away_on_desc, fmt1(temp)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = LocalContentColor.current.copy(alpha = 0.8f),
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Button(onBack, enabled = !busy, shapes = ButtonDefaults.shapes()) {
-                if (busy) LoadingIndicator(Modifier.size(24.dp), color = LocalContentColor.current)
-                else Text(stringResource(Res.string.away_back))
-            }
+        FilledTonalButton(onBack, enabled = !busy, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) {
+            if (busy) LoadingIndicator(Modifier.size(24.dp), color = LocalContentColor.current)
+            else Text(stringResource(Res.string.away_back))
         }
     }
 }

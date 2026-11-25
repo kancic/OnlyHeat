@@ -177,9 +177,12 @@ internal fun ScheduleTip(onDismiss: () -> Unit, onOpenSchedule: () -> Unit) {
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Scene(warm(), warmInk()) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(Modifier.padding(horizontal = 16.dp)) {
                         Text(stringResource(Res.string.schedule), style = MaterialTheme.typography.labelLarge)
-                        TempStepper(21.0, {}, label = stringResource(Res.string.target), onLocked = {}) // locked, like the real card
+                        // A room card's Floor row, its stepper locked like the real one.
+                        DeviceRow(floorIcon(true, true), stringResource(Res.string.heating_title), true, {}) {
+                            TempStepper(21.0, {}, compact = true, onLocked = {})
+                        }
                     }
                 }
                 Spacer(Modifier.height(12.dp))

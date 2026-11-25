@@ -2,7 +2,6 @@ package ancic.karim.onlyheat
 
 import ancic.karim.onlyheat.res.*
 import androidx.compose.animation.animateContentSize
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -10,6 +9,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -435,7 +436,7 @@ internal fun AcDiscoveryCard(
         onClick = onDiscover,
         modifier = modifier.fillMaxWidth(),
         enabled = enabled,
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = LocalCardShape.current,
         colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainerHigh),
     ) {
         Row(
@@ -443,9 +444,7 @@ internal fun AcDiscoveryCard(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.size(40.dp).background(scheme.secondaryContainer, MaterialShapes.Cookie9Sided.toShape()), Alignment.Center) {
-                Icon(AcIcon, contentDescription = null, Modifier.size(22.dp), tint = scheme.onSecondaryContainer)
-            }
+            Badge(AcIcon, MaterialShapes.Cookie9Sided, accent = 1)
             Column(Modifier.weight(1f)) {
                 Text(
                     stringResource(if (discovering) Res.string.ac_discovering else Res.string.ac_discover),
@@ -476,14 +475,12 @@ internal fun AcFoundCard(
     val scheme = MaterialTheme.colorScheme
     Card(
         modifier.fillMaxWidth().animateContentSize(MaterialTheme.motionScheme.defaultSpatialSpec()),
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = LocalCardShape.current,
         colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainerHigh),
     ) {
         Column(if (minimized) Modifier.padding(horizontal = 16.dp, vertical = 10.dp) else Modifier.padding(start = 16.dp, top = 12.dp, end = 4.dp, bottom = 8.dp)) {
             Row(Modifier.heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) { // QuickCard's stepper height
-                Box(Modifier.size(40.dp).background(scheme.primary, MaterialShapes.Cookie9Sided.toShape()), Alignment.Center) {
-                    Icon(AcIcon, null, Modifier.size(22.dp), tint = scheme.onPrimary)
-                }
+                Badge(AcIcon, MaterialShapes.Cookie9Sided)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -560,7 +557,7 @@ internal fun DeviceRow(
     onLabel: (() -> Unit)? = null, description: String? = null, trailing: @Composable () -> Unit = {},
 ) {
     val ink = LocalContentColor.current
-    Row(Modifier.heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
         Row(
             Modifier.weight(1f).clip(MaterialTheme.shapes.medium)
                 .then(if (onLabel != null) Modifier.clickable(role = Role.Button, onClick = onLabel) else Modifier)
@@ -660,10 +657,26 @@ internal fun AcSheet(
     warning: @Composable () -> Unit = {}, // the fight card, so a change made here that starts a fight says so
 ) {
     ModalBottomSheet(onDismiss) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-            Box(Modifier.padding(horizontal = 16.dp)) { warning() }
-            val subtitle = if (ac.state != null) room.name else acText(null, ac.loaded)
-            AcControls(ac.state, ac.loaded, subtitle, onChange, onRemove, Modifier.padding(start = 24.dp, end = 24.dp, bottom = 24.dp))
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            warning()
+            Row(verticalAlignment = Alignment.CenterVertically) { // the room screen's AC card header, plus the room
+                Badge(acIcon(ac.state), MaterialShapes.Cookie9Sided, accent = 2, modifier = Modifier.align(Alignment.Top))
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(Res.string.ac_title), style = MaterialTheme.typography.titleMediumEmphasized)
+                    // Room and status on their own lines: joined, a long room name wraps mid-status.
+                    listOf(room.name, acText(ac.state, ac.loaded)).forEach {
+                        Text(it, style = MaterialTheme.typography.bodyMedium, color = LocalContentColor.current.copy(alpha = 0.8f))
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                AcPower(ac, onChange)
+            }
+            ac.state?.let { AcControls(it, onChange) }
+            AcRemove(onRemove)
         }
     }
 }
@@ -674,67 +687,90 @@ internal fun AcFightCard(
     busy: Boolean = false, onHeatingOff: () -> Unit,
 ) = NoticeCard(fightNotice(room, outside, onChange, busy = busy, onHeatingOff = onHeatingOff), modifier)
 
-/** The same controls as a card on the room's detail screen. */
+/** The same controls as a Settings card on the room's detail screen, tinted while the AC is on. */
 @Composable
-internal fun AcCard(
-    ac: AcView, onChange: (AcChange) -> Unit, onRemove: () -> Unit,
-) {
-    val (state, loaded) = ac
-    Card(
-        Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(
-            containerColor = if (state?.power == true) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-        ),
-    ) {
-        AcControls(state, loaded, acText(state, loaded), onChange, onRemove, Modifier.padding(20.dp))
-    }
+internal fun AcCard(ac: AcView, onChange: (AcChange) -> Unit, onRemove: () -> Unit) {
+    val state = ac.state
+    Section(
+        stringResource(Res.string.ac_title), acText(state, ac.loaded), acIcon(state), MaterialShapes.Cookie9Sided, accent = 2,
+        container = if (state?.power == true) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+        below = {
+            state?.let { AcControls(it, onChange) }
+            AcRemove(onRemove) // also while the AC can't be reached
+        },
+    ) { AcPower(ac, onChange) }
 }
 
-/** Power, mode, temperature, fan and Remove. */
 @Composable
-private fun AcControls(
-    state: AcState?, loaded: Boolean, subtitle: String,
-    onChange: (AcChange) -> Unit, onRemove: () -> Unit, modifier: Modifier,
-) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(Res.string.ac_title), style = MaterialTheme.typography.titleLargeEmphasized)
-                Text(subtitle, style = MaterialTheme.typography.bodyMedium)
-            }
-            if (state != null) Switch(state.power, { onChange(AcChange(power = it)) })
-            else if (!loaded) LoadingIndicator(Modifier.size(32.dp))
-        }
-        if (state != null) {
-            val modes = listOf(
-                AcMode.Cool to Res.string.ac_mode_cool, AcMode.Heat to Res.string.ac_mode_heat, AcMode.Dry to Res.string.ac_mode_dry,
-                AcMode.Fan to Res.string.ac_mode_fan, AcMode.Auto to Res.string.ac_mode_auto,
-            )
-            Segmented(modes.map { it.first to stringResource(it.second) }, state.mode, state.power) { onChange(AcChange(mode = it)) }
-            if (state.mode != AcMode.Fan) TempStepper(
+private fun AcPower(ac: AcView, onChange: (AcChange) -> Unit) {
+    if (ac.state != null) Switch(ac.state.power, { onChange(AcChange(power = it)) })
+    else if (!ac.loaded) LoadingIndicator(Modifier.size(32.dp))
+}
+
+/** Rarely used, so a quiet text button in the card's own ink, not a tonal one like the card's actions. */
+@Composable
+private fun AcRemove(onRemove: () -> Unit) = TextButton(
+    onRemove, shapes = ButtonDefaults.shapes(), colors = ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current),
+    modifier = Modifier.offset(x = (-16).dp), // text in line with the labels above
+) { Text(stringResource(Res.string.ac_remove)) }
+
+/** Mode, temperature and fan. */
+@Composable
+private fun AcControls(state: AcState, onChange: (AcChange) -> Unit) {
+    Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Both rows keep a label: each has an Auto.
+        Text(stringResource(Res.string.ac_mode), style = MaterialTheme.typography.labelLarge)
+        val modes = listOf(
+            AcMode.Cool to Res.string.ac_mode_cool, AcMode.Heat to Res.string.ac_mode_heat, AcMode.Dry to Res.string.ac_mode_dry,
+            AcMode.Fan to Res.string.ac_mode_fan, AcMode.Auto to Res.string.ac_mode_auto,
+        )
+        Segmented(modes.map { it.first to stringResource(it.second) }, state.mode, state.power) { onChange(AcChange(mode = it)) }
+        if (state.mode != AcMode.Fan) Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Like Thermal Intelligence's target row.
+            Text(stringResource(Res.string.smart_target), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+            TempStepper(
                 state.target.toDouble(), { onChange(AcChange(target = it.toInt())) },
-                label = stringResource(Res.string.target), step = 1.0, min = AC_MIN_T.toDouble(), max = AC_MAX_T.toDouble(),
+                buttonSize = 44.dp, step = 1.0, min = AC_MIN_T.toDouble(), max = AC_MAX_T.toDouble(),
             )
-            val fans = listOf(
-                AcFan.Auto to Res.string.ac_fan_auto, AcFan.Low to Res.string.ac_fan_low,
-                AcFan.Medium to Res.string.ac_fan_medium, AcFan.High to Res.string.ac_fan_high,
-            )
-            Text(stringResource(Res.string.ac_fan), style = MaterialTheme.typography.labelLarge)
-            Segmented(fans.map { it.first to stringResource(it.second) }, state.fan, state.power) { onChange(AcChange(fan = it)) }
         }
-        TextButton(onRemove) { Text(stringResource(Res.string.ac_remove)) }
+        Text(stringResource(Res.string.ac_fan), style = MaterialTheme.typography.labelLarge)
+        val fans = listOf(
+            AcFan.Auto to Res.string.ac_fan_auto, AcFan.Low to Res.string.ac_fan_low,
+            AcFan.Medium to Res.string.ac_fan_medium, AcFan.High to Res.string.ac_fan_high,
+        )
+        Segmented(fans.map { it.first to stringResource(it.second) }, state.fan, state.power) { onChange(AcChange(fan = it)) }
     }
 }
 
 @Composable
 private fun <T> Segmented(options: List<Pair<T, String>>, selected: T, enabled: Boolean, onSelect: (T) -> Unit) {
-    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+    val ink = LocalContentColor.current
+    ButtonGroup(
+        overflowIndicator = { ButtonGroupDefaults.OverflowIndicator(it) },
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
+    ) {
         options.forEachIndexed { i, (value, label) ->
-            SegmentedButton(
-                selected = value == selected, onClick = { onSelect(value) }, enabled = enabled,
-                shape = SegmentedButtonDefaults.itemShape(i, options.size), icon = {},
-                contentPadding = PaddingValues(horizontal = 4.dp), // "Medium" / "Srednja" fit on a phone-width card
-            ) { Text(label, maxLines = 1) }
+            customItem(
+                buttonGroupContent = {
+                    ToggleButton(
+                        checked = value == selected, onCheckedChange = { onSelect(value) }, enabled = enabled,
+                        modifier = Modifier.weight(1f).semantics { role = Role.RadioButton },
+                        shapes = when (i) {
+                            0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                            options.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                            else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                        },
+                        colors = ink.let { // unchecked in the card's own ink like the other card buttons, not a dark hole
+                            ToggleButtonDefaults.colors(containerColor = it.copy(alpha = 0.12f), contentColor = it)
+                        },
+                        contentPadding = PaddingValues(horizontal = 4.dp), // "Medium" / "Srednja" fit on a phone-width card
+                    ) { Text(label, maxLines = 1) }
+                },
+                menuContent = { menu ->
+                    DropdownMenuItem({ Text(label) }, { onSelect(value); menu.dismiss() }, enabled = enabled)
+                },
+            )
         }
     }
 }

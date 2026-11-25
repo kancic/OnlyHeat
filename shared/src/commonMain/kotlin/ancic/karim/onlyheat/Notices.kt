@@ -69,39 +69,30 @@ internal fun loadOperationNotices(settings: Settings) = OperationNotice.entries.
     settings.getStringOrNull(OPERATION_NOTICE + notice.name)?.let { notice to it }
 }.toMap()
 
+/** A Settings card ([Section]): errors and warnings tinted with a badge in their own ink, suggestions and info
+ *  neutral with a colorful badge (suggestions primary, info tertiary, so neighbours differ). */
 @Composable
 internal fun NoticeCard(n: Notice, modifier: Modifier = Modifier, onClose: (() -> Unit)? = null) {
     n.custom?.let { return it(modifier, onClose) }
     val scheme = MaterialTheme.colorScheme
-    val (container, content) = when (n.level) {
+    val (container, ink) = when (n.level) {
         Level.Error -> scheme.errorContainer to scheme.onErrorContainer
-        Level.Warning -> scheme.tertiaryContainer to scheme.onTertiaryContainer
+        Level.Warning -> hueContainer(AMBER) to hueContent(AMBER)
         else -> scheme.surfaceContainerHigh to scheme.onSurface
     }
-    Card(
-        modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(containerColor = container, contentColor = content),
+    Section(
+        n.title, n.text, n.icon, MaterialShapes.Cookie9Sided, accent = if (n.level == Level.Info) 1 else 0,
+        modifier = modifier, container = container, ink = ink,
+        below = if (n.actions.isEmpty()) null else ({
+            Row(Modifier.align(Alignment.End).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                n.actions.forEach { a ->
+                    FilledTonalButton(a.onClick, enabled = a.enabled, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) { Text(a.label) }
+                }
+            }
+        }),
     ) {
-        Column(Modifier.padding(start = 16.dp, top = 12.dp, end = 4.dp, bottom = if (n.actions.isEmpty()) 12.dp else 4.dp)) {
-            Row {
-                if (n.icon != null) {
-                    Box(Modifier.size(40.dp).background(content.copy(alpha = 0.12f), MaterialShapes.Cookie9Sided.toShape()), Alignment.Center) {
-                        Icon(n.icon, null, Modifier.size(22.dp))
-                    }
-                    Spacer(Modifier.width(12.dp))
-                }
-                Column(Modifier.weight(1f).padding(top = 2.dp, end = if (onClose == null) 12.dp else 0.dp)) {
-                    if (n.title != null) Text(n.title, style = MaterialTheme.typography.titleMediumEmphasized)
-                    Text(n.text, style = MaterialTheme.typography.bodyMedium)
-                }
-                if (onClose != null) IconButton(onClose, shapes = IconButtonDefaults.shapes()) {
-                    Icon(CloseIcon, stringResource(Res.string.close))
-                }
-            }
-            if (n.actions.isNotEmpty()) Row(Modifier.align(Alignment.End).padding(end = 8.dp)) {
-                val colors = ButtonDefaults.textButtonColors(contentColor = content) // primary is unreadable on red
-                n.actions.forEach { a -> TextButton(a.onClick, enabled = a.enabled, colors = colors) { Text(a.label) } }
-            }
+        if (onClose != null) IconButton(onClose, modifier = Modifier.align(Alignment.Top).offset(y = (-8).dp), shapes = IconButtonDefaults.shapes()) {
+            Icon(CloseIcon, stringResource(Res.string.close))
         }
     }
 }

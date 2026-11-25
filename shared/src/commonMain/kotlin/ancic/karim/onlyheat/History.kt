@@ -65,11 +65,17 @@ private fun SubScreen(
     Scaffold(
         modifier = modifier.collapsing(scroll),
         topBar = {
-            MediumFlexibleTopAppBar(
+            // As a tab, the same large bar as Rooms and Settings; a pushed screen gets the medium one with a back arrow.
+            if (onBack == null) LargeFlexibleTopAppBar(
+                title = { Text(title, maxLines = 1) },
+                subtitle = subtitle?.let { { Text(it) } },
+                scrollBehavior = scroll,
+            )
+            else MediumFlexibleTopAppBar(
                 title = { Text(title, maxLines = 1) },
                 subtitle = subtitle?.let { { Text(it) } },
                 navigationIcon = {
-                    if (onBack != null) IconButton(onBack, shapes = IconButtonDefaults.shapes()) {
+                    IconButton(onBack, shapes = IconButtonDefaults.shapes()) {
                         Icon(ArrowBack, contentDescription = stringResource(Res.string.back))
                     }
                 },
@@ -126,8 +132,9 @@ fun RoomScreen(
             val cold = isCold(room, settings)
             val asleep = !activity.awake && !cold
             val spec = MaterialTheme.motionScheme.defaultEffectsSpec<Color>()
-            val blob by animateColorAsState(if (asleep) NightSky else roomContainer(room.id), spec)
-            val ink by animateColorAsState(if (asleep) NightInk else contentColorFor(roomContainer(room.id)), spec)
+            val (roomContainer, roomContent) = roomColors(room.id)
+            val blob by animateColorAsState(if (asleep) NightSky else roomContainer, spec)
+            val ink by animateColorAsState(if (asleep) NightInk else roomContent, spec)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Hero: the temperature sits in a blob that turns into a spinning cookie while heating,
                 // with the list card's animations inside, clipped to the blob.
@@ -165,19 +172,16 @@ fun RoomScreen(
             }
 
             ac?.let { acWarning(it) } // under the hero, still seen without scrolling
-            Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge, colors = containerHigh()) {
-                Column(Modifier.padding(20.dp)) {
-                    Text(stringResource(Res.string.last_24h), style = MaterialTheme.typography.titleMediumEmphasized)
-                    Spacer(Modifier.height(12.dp))
+            Section(
+                stringResource(Res.string.last_24h), null, ChartIcon, MaterialShapes.Cookie9Sided,
+                below = {
                     val l = log
                     if (l == null) Box(Modifier.fillMaxWidth().height(220.dp), Alignment.Center) {
                         logError?.let { Text(it, color = MaterialTheme.colorScheme.error) } ?: LoadingIndicator()
                     }
                     else {
                         StatsLine(l, MaterialTheme.typography.titleSmall)
-                        Spacer(Modifier.height(8.dp))
                         TempChart(l, Modifier.fillMaxWidth().height(220.dp), interactive = true)
-                        Spacer(Modifier.height(8.dp))
                         Legend()
                         logError?.let { Text(it, color = MaterialTheme.colorScheme.error) } // stale chart, refresh failed
                         val temps = l.mapNotNull { it.current }
@@ -187,16 +191,21 @@ fun RoomScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                }
-            }
+                },
+            )
 
             ac?.let { acCard(it) }
-            BoostCard(boost, onBoost, onStopBoost)
             val supported = remember { hasThermalIntelligence(settings.getStringOrNull(FIRMWARE)) }
             // Old firmware: only show it while it's on, so it can be turned off.
-            if (supported || smart?.on == true) SmartCard(api, key, room, smart, smartError, supported) {
-                smart = it
-                onSmartChanged()
+            val showSmart = supported || smart?.on == true
+            Group { // the room's heating controls in one block, like a Settings section
+                item("boost") { BoostCard(boost, onBoost, onStopBoost) }
+                if (showSmart) item("smart") {
+                    SmartCard(api, key, room, smart, smartError, supported) {
+                        smart = it
+                        onSmartChanged()
+                    }
+                }
             }
           }
     }
@@ -218,32 +227,22 @@ private fun HeroDevice(icon: ImageVector, value: String, name: String, on: Boole
 
 @Composable
 private fun BoostCard(boost: Boost?, onBoost: (Int) -> Unit, onStop: () -> Unit) {
-    Card(
-        Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(
-            containerColor = if (boost != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-        ),
-    ) {
-        Column(Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(Res.string.boost_title), style = MaterialTheme.typography.titleMediumEmphasized)
-                    Text(
-                        if (boost != null) stringResource(Res.string.boost_active, fmt1(boost.target), hhmm(boost.until))
-                        else stringResource(Res.string.boost_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                if (boost != null) TextButton(onStop, shapes = ButtonDefaults.shapes()) { Text(stringResource(Res.string.boost_stop)) }
-            }
-            Spacer(Modifier.height(12.dp))
+    Section(
+        stringResource(Res.string.boost_title),
+        if (boost != null) stringResource(Res.string.boost_active, fmt1(boost.target), hhmm(boost.until))
+        else stringResource(Res.string.boost_desc),
+        FlameIcon, MaterialShapes.Sunny, accent = 1,
+        container = if (boost != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+        below = {
             // Tapping again while boosted restarts the timer from now.
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(30 to Res.string.boost_30, 60 to Res.string.boost_60, 120 to Res.string.boost_120).forEach { (min, label) ->
                     FilledTonalButton({ onBoost(min) }, modifier = Modifier.weight(1f), shapes = ButtonDefaults.shapes(), colors = onCardTonal()) { Text(stringResource(label)) }
                 }
             }
-        }
+        },
+    ) {
+        if (boost != null) FilledTonalButton(onStop, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) { Text(stringResource(Res.string.boost_stop)) }
     }
 }
 
@@ -269,49 +268,38 @@ private fun SmartCard(api: HeatApi, key: String, room: Room, smart: Smart?, load
         }
     }
 
-    Card(
-        Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(
-            containerColor = if (smart?.on == true) MaterialTheme.colorScheme.tertiaryContainer
-            else MaterialTheme.colorScheme.surfaceContainerHigh,
-        ),
-    ) {
-        Column(Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(Res.string.smart_heating), style = MaterialTheme.typography.titleMediumEmphasized)
-                    Text(
-                        when {
-                            smart == null -> loadError ?: stringResource(Res.string.loading)
-                            smart.on -> stringResource(Res.string.smart_on, smart.target?.let(::fmt1) ?: "–")
-                            else -> stringResource(Res.string.off)
-                        },
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (busy) LoadingIndicator(Modifier.size(36.dp))
-                else if (smart?.on == true) TextButton({ apply(false) }, shapes = ButtonDefaults.shapes()) { Text(stringResource(Res.string.turn_off)) }
-            }
-            Spacer(Modifier.height(8.dp))
+    Section(
+        stringResource(Res.string.smart_heating),
+        when {
+            smart == null -> loadError ?: stringResource(Res.string.loading)
+            smart.on -> stringResource(Res.string.smart_on, smart.target?.let(::fmt1) ?: "–")
+            else -> stringResource(Res.string.off)
+        },
+        AutoIcon, MaterialShapes.Clover4Leaf, accent = 2,
+        container = if (smart?.on == true) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+        below = {
             Text(
                 stringResource(if (supported) Res.string.smart_desc else Res.string.smart_unsupported),
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
             )
             if (smart != null && supported) {
-                Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(Res.string.smart_target), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                     TempStepper(target, { target = it }, buttonSize = 44.dp)
                 }
-                Spacer(Modifier.height(12.dp))
                 Button(
                     { apply(true) }, enabled = !busy, shapes = ButtonDefaults.shapes(),
-                    modifier = Modifier.fillMaxWidth().height(ButtonDefaults.MediumContainerHeight),
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp).height(ButtonDefaults.MediumContainerHeight),
                 ) {
                     Text(stringResource(if (smart.on) Res.string.smart_update else Res.string.smart_turn_on))
                 }
             }
-            msg?.let { Spacer(Modifier.height(8.dp)); Text(it, color = MaterialTheme.colorScheme.error) }
+            msg?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        },
+    ) {
+        if (busy) LoadingIndicator(Modifier.size(36.dp))
+        else if (smart?.on == true) FilledTonalButton({ apply(false) }, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) {
+            Text(stringResource(Res.string.turn_off))
         }
     }
 }
@@ -406,9 +394,10 @@ fun OverviewScreen(
                 Message(stringResource(Res.string.no_history), Modifier.fillMaxWidth().padding(top = 48.dp), ChartIcon, onRetry = null)
             }
             else itemsIndexed(rows, key = { _, it -> it.first.id }) { i, (room, points) ->
+                val (container, ink) = roomColors(room.id)
                 PressCard(
                     { onRoom(room.id) }, Modifier.springIn(i).fillMaxWidth().shared("room-${room.id}"),
-                    colors = CardDefaults.cardColors(containerColor = roomContainer(room.id)),
+                    colors = CardDefaults.cardColors(containerColor = container, contentColor = ink),
                 ) {
                     Column(Modifier.padding(20.dp)) {
                         Text(room.name, style = MaterialTheme.typography.titleMediumEmphasized)
@@ -439,9 +428,6 @@ fun OverviewScreen(
         } }
     }
 }
-
-@Composable
-private fun containerHigh() = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
 
 /** Time spent under target, and how long the latest target raise took to reach. */
 internal data class ChartStats(val belowSeconds: Long, val heatUpSeconds: Long?)
