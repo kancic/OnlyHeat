@@ -4,7 +4,9 @@ import ancic.karim.onlyheat.res.*
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.semantics.Role
@@ -30,6 +32,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.number
+import kotlinx.datetime.toLocalDateTime
 import kotlin.uuid.Uuid
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
@@ -175,11 +181,14 @@ internal suspend fun <T> Settings.withAc(
 internal suspend fun acTipState(ac: LinkedAc): AcState? =
     withTimeoutOrNull(5.seconds) { attempt { ac.status() }.getOrNull() }
 
+/** The AC tip's Turn on cools at most to a degree under "Too warm above". */
+internal fun acCoolCap(warmAbove: Double) = (warmAbove - 1).toInt().coerceIn(AC_MIN_T, AC_MAX_T)
+
 /** "Turn on" from the AC tip: cool at the AC's own setting, capped a degree under "Too warm above" so a winter heat
  *  setting doesn't cool to 30°. Rooms run at once and give up after 8 s: a broadcast receiver has about 10 s. */
 suspend fun coolRooms(s: Settings, linkIds: List<String>): Boolean {
     val key = savedAuthKey(s) ?: return false
-    val cap = (warmSetting(s) - 1).toInt().coerceIn(AC_MIN_T, AC_MAX_T)
+    val cap = acCoolCap(warmSetting(s))
     val rooms = s.linkedAcs(key).entries.associate { (room, ac) -> ac.id to room }
     if (linkIds.isEmpty() || !rooms.keys.containsAll(linkIds)) return false
     return withTimeoutOrNull(8.seconds) {
@@ -224,7 +233,9 @@ internal class AcModel(private val settings: Settings, private val key: String) 
     private val pending = mutableMapOf<String, Job>()
     private val queued = mutableMapOf<String, AcChange>()
     private val revisions = mutableMapOf<String, Long>()
-    private val awayRooms = mutableSetOf<String>()
+    private val awayRooms = mutableStateSetOf<String>()
+    /** Away or I'm back is switching this room's AC, so [set] ignores changes until it's done. */
+    fun busy(roomId: String) = roomId in awayRooms
 
     private fun bump(id: String) {
         revisions[id] = (revisions[id] ?: 0L) + 1
@@ -416,11 +427,13 @@ internal class AcModel(private val settings: Settings, private val key: String) 
 }
 
 @Composable
-internal fun AcDiscoveryCard(discovering: Boolean, enabled: Boolean, onDiscover: () -> Unit) {
+internal fun AcDiscoveryCard(
+    discovering: Boolean, enabled: Boolean, modifier: Modifier, onClose: (() -> Unit)?, onDiscover: () -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
     Card(
         onClick = onDiscover,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         enabled = enabled,
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainerHigh),
@@ -445,6 +458,9 @@ internal fun AcDiscoveryCard(discovering: Boolean, enabled: Boolean, onDiscover:
                 )
             }
             if (discovering) LoadingIndicator(Modifier.size(24.dp))
+            else if (onClose != null) IconButton(onClose, shapes = IconButtonDefaults.shapes()) {
+                Icon(CloseIcon, stringResource(Res.string.close), tint = scheme.onSurfaceVariant)
+            }
             else Icon(ArrowBack, contentDescription = null, Modifier.size(24.dp).rotate(180f), tint = scheme.onSurfaceVariant)
         }
     }
@@ -569,6 +585,24 @@ internal fun DeviceRow(
 internal fun fighting(room: Room, state: AcState?) =
     state != null && state.cooling && !room.cooling && room.target != null && (room.heating || room.target > state.target)
 
+/** In a fight, the AC is the one to turn off when it's clearly cold outside, and the heating when it's at least
+ *  as warm outside as in the room (the AC tip's rule, Watch.kt). In between, as on a summer night that is merely
+ *  cooler than the room, or without an outside temperature (no AccuWeather on old firmware, no TS7 sensor),
+ *  the season decides: October to April the heating stays. */
+internal fun acIsWrong(room: Room, outside: Double?, month: Int = thisMonth()) = when {
+    outside != null && outside < COLD_OUTSIDE -> true
+    outside != null && room.current != null && outside >= room.current -> false
+    else -> month in HEATING_MONTHS
+}
+
+// ponytail: a guess at "heating weather"; tune it if the card picks the wrong side in spring or autumn
+private const val COLD_OUTSIDE = 15.0
+
+// ponytail: northern hemisphere; use the controller's latitude if one ever ships south of the equator
+private val HEATING_MONTHS = setOf(10, 11, 12, 1, 2, 3, 4)
+
+private fun thisMonth() = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).month.number
+
 /** The AC's mode as an icon: snowflake for cool (and off), sun, drop, wind, or arrows for auto. */
 internal fun acIcon(state: AcState?) = when (state?.mode?.takeIf { state.power }) {
     AcMode.Heat -> SunIcon
@@ -595,11 +629,12 @@ internal fun acValue(state: AcState?, loaded: Boolean): String = when {
 /** The AC's row on a room card, the twin of the heating row. The icon shows the mode; tapping the name opens
  *  mode and fan ([onMore]). */
 @Composable
-internal fun AcRow(ac: AcView, onChange: (AcChange) -> Unit, onMore: () -> Unit) {
+internal fun AcRow(ac: AcView, conflict: Boolean, onChange: (AcChange) -> Unit, onMore: () -> Unit) {
     val (state, loaded) = ac
     DeviceRow(
-        acIcon(state), stringResource(Res.string.ac_short), state?.power,
-        { onChange(AcChange(power = it)) }, onMore, acText(state, loaded),
+        if (conflict) WarningIcon else acIcon(state), stringResource(Res.string.ac_short), state?.power,
+        { onChange(AcChange(power = it)) }, onMore,
+        if (conflict) stringResource(Res.string.ac_fighting) else acText(state, loaded),
     ) {
         when {
             !loaded -> LoadingIndicator(Modifier.size(32.dp))
@@ -621,18 +656,28 @@ internal fun AcRow(ac: AcView, onChange: (AcChange) -> Unit, onMore: () -> Unit)
 /** Controls for a room's AC, opened from the room card's AC button. */
 @Composable
 internal fun AcSheet(
-    room: Room, ac: AcView, onChange: (AcChange) -> Unit, onHeatingOff: () -> Unit, onRemove: () -> Unit, onDismiss: () -> Unit,
+    room: Room, ac: AcView, onChange: (AcChange) -> Unit, onRemove: () -> Unit, onDismiss: () -> Unit,
+    warning: @Composable () -> Unit = {}, // the fight card, so a change made here that starts a fight says so
 ) {
     ModalBottomSheet(onDismiss) {
-        val subtitle = if (ac.state != null) room.name else acText(null, ac.loaded)
-        AcControls(room, ac.state, ac.loaded, subtitle, onChange, onHeatingOff, onRemove, Modifier.padding(start = 24.dp, end = 24.dp, bottom = 24.dp))
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+            Box(Modifier.padding(horizontal = 16.dp)) { warning() }
+            val subtitle = if (ac.state != null) room.name else acText(null, ac.loaded)
+            AcControls(ac.state, ac.loaded, subtitle, onChange, onRemove, Modifier.padding(start = 24.dp, end = 24.dp, bottom = 24.dp))
+        }
     }
 }
+
+@Composable
+internal fun AcFightCard(
+    room: Room, outside: Double?, onChange: (AcChange) -> Unit, modifier: Modifier = Modifier,
+    busy: Boolean = false, onHeatingOff: () -> Unit,
+) = NoticeCard(fightNotice(room, outside, onChange, busy = busy, onHeatingOff = onHeatingOff), modifier)
 
 /** The same controls as a card on the room's detail screen. */
 @Composable
 internal fun AcCard(
-    room: Room, ac: AcView, onChange: (AcChange) -> Unit, onHeatingOff: () -> Unit, onRemove: () -> Unit,
+    ac: AcView, onChange: (AcChange) -> Unit, onRemove: () -> Unit,
 ) {
     val (state, loaded) = ac
     Card(
@@ -641,15 +686,15 @@ internal fun AcCard(
             containerColor = if (state?.power == true) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
         ),
     ) {
-        AcControls(room, state, loaded, acText(state, loaded), onChange, onHeatingOff, onRemove, Modifier.padding(20.dp))
+        AcControls(state, loaded, acText(state, loaded), onChange, onRemove, Modifier.padding(20.dp))
     }
 }
 
-/** Power, mode, temperature, fan, the heating warning and Remove. */
+/** Power, mode, temperature, fan and Remove. */
 @Composable
 private fun AcControls(
-    room: Room, state: AcState?, loaded: Boolean, subtitle: String,
-    onChange: (AcChange) -> Unit, onHeatingOff: () -> Unit, onRemove: () -> Unit, modifier: Modifier,
+    state: AcState?, loaded: Boolean, subtitle: String,
+    onChange: (AcChange) -> Unit, onRemove: () -> Unit, modifier: Modifier,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -676,14 +721,6 @@ private fun AcControls(
             )
             Text(stringResource(Res.string.ac_fan), style = MaterialTheme.typography.labelLarge)
             Segmented(fans.map { it.first to stringResource(it.second) }, state.fan, state.power) { onChange(AcChange(fan = it)) }
-            if (fighting(room, state)) {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(stringResource(Res.string.ac_fighting), style = MaterialTheme.typography.bodyMedium)
-                        TextButton(onHeatingOff) { Text(stringResource(Res.string.ac_heating_off)) }
-                    }
-                }
-            }
         }
         TextButton(onRemove) { Text(stringResource(Res.string.ac_remove)) }
     }

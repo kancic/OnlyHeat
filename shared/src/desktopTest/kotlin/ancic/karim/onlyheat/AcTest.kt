@@ -3,6 +3,7 @@ package ancic.karim.onlyheat
 import androidx.lifecycle.viewModelScope
 import com.russhwolf.settings.PreferencesSettings
 import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
@@ -15,6 +16,9 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import java.util.UUID
 import java.util.prefs.Preferences
 import kotlin.test.Test
@@ -23,6 +27,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.TestTimeSource
 
 class AcTest {
     @Test
@@ -226,6 +232,69 @@ class AcTest {
         assertFalse(RoomActivity(room, ac).floor)
     }
 
+    @Test
+    fun roomsPollingRefreshesFallbackWeatherAndDiscardsItOnFailure() = runTest {
+        val clock = TestTimeSource()
+        var weatherRequests = 0
+        var outdoorSensor: Int? = null
+        var forecast = """{"status":"OK","dasboardForecast":[{"id":"daily","temperature":13}]}"""
+        val client = HttpClient(OkHttp) {
+            engine {
+                config {
+                    addInterceptor { chain ->
+                        val request = chain.request()
+                        val body = when (request.url.pathSegments.last()) {
+                            "getRooms" -> """{"status":"OK","s7Temp":$outdoorSensor,"rooms":[]}"""
+                            "getSmartForecast" -> { weatherRequests++; forecast }
+                            else -> error("Unexpected request path")
+                        }
+                        Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
+                            .code(200).message("OK").body(body.toResponseBody()).build()
+                    }
+                }
+            }
+        }
+        try {
+            withSettings { s ->
+                val history = object : ReadingDao {
+                    override suspend fun insert(readings: List<Reading>) = error("unexpected history write")
+                    override suspend fun averaged(roomId: String, from: Long, bucket: Long) = error("unexpected history read")
+                    override suspend fun oldest() = error("unexpected history read")
+                }
+                val model = HomeModel(HeatApi(client), history, "first", s, clock)
+                val room = Room("r1", "Room", 24.0, 27.0, null, heating = true, smart = false, schedule = false)
+                model.refreshOnResume()
+                assertEquals(13.0, model.outside)
+                assertTrue(acIsWrong(room, model.outside, month = 7))
+
+                clock += 2.minutes
+                model.pollRooms()
+                assertEquals(1, weatherRequests)
+
+                forecast = """{"status":"OK","dasboardForecast":[{"id":"daily","temperature":25}]}"""
+                clock += 13.minutes
+                model.pollRooms()
+                assertEquals(2, weatherRequests)
+                assertEquals(25.0, model.outside)
+                assertFalse(acIsWrong(room, model.outside, month = 7))
+
+                outdoorSensor = 21
+                model.pollRooms()
+                assertEquals(21.0, model.outside)
+                assertEquals(2, weatherRequests)
+
+                outdoorSensor = null
+                forecast = """{"status":"ERROR","message":"No weather"}"""
+                clock += 15.minutes
+                model.pollRooms()
+                assertEquals(3, weatherRequests)
+                assertNull(model.outside)
+            }
+        } finally {
+            client.close()
+        }
+    }
+
     private val ac = LinkedAc("gree", "f4911ed454bb", "192.168.100.53", "w7Yz|0Bc3")
     private fun reply(json: String) = Json.parseToJsonElement(json).jsonObject
 
@@ -236,5 +305,19 @@ class AcTest {
         } finally {
             node.removeNode()
         }
+    }
+}
+
+class AcIsWrongTest {
+    private val room = Room("1", "R", current = 24.0, target = 27.0, humidity = null, heating = true, smart = false, schedule = false)
+
+    @Test
+    fun picksBySeason() {
+        assertTrue(acIsWrong(room, outside = 1.0)) // winter: the AC goes
+        assertFalse(acIsWrong(room, outside = 30.0)) // summer: the heating goes
+        assertTrue(acIsWrong(room, outside = null, month = 1)) // no weather in winter: the AC
+        assertFalse(acIsWrong(room, outside = null, month = 7)) // no weather in summer: the heating
+        assertFalse(acIsWrong(room, outside = 21.0, month = 7)) // summer night, cooler than the room: still the heating
+        assertTrue(acIsWrong(room, outside = 20.0, month = 11)) // mild autumn day: the AC
     }
 }

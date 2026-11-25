@@ -87,7 +87,8 @@ fun RoomScreen(
     api: HeatApi, key: String, room: Room, boost: Boost?,
     onBoost: (minutes: Int) -> Unit, onStopBoost: () -> Unit, onSmartChanged: () -> Unit,
     ac: AcView? = null, // the room's AC: the hero then shows the floor and the AC as two equal lines and animates for both
-    acCard: @Composable (AcView) -> Unit = {}, // its controls, under the hero
+    acCard: @Composable (AcView) -> Unit = {}, // its controls, under the chart
+    acWarning: @Composable (AcView) -> Unit = {}, // heating and AC working against each other, under the hero
     onBack: () -> Unit,
 ) {
     val settings = koinInject<Settings>()
@@ -163,6 +164,7 @@ fun RoomScreen(
                 }
             }
 
+            ac?.let { acWarning(it) } // under the hero, still seen without scrolling
             Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge, colors = containerHigh()) {
                 Column(Modifier.padding(20.dp)) {
                     Text(stringResource(Res.string.last_24h), style = MaterialTheme.typography.titleMediumEmphasized)

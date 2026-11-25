@@ -87,6 +87,8 @@ import org.koin.core.parameter.parametersOf
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
 
 internal val Heat = Color(0xFFFF5A00)
 internal val NightSky = Color(0xFF353D70)
@@ -168,7 +170,8 @@ internal class HomeModel(
     private val api: HeatApi,
     private val history: ReadingDao,
     private val key: String,
-    private val settings: Settings
+    private val settings: Settings,
+    private val weatherClock: TimeSource = TimeSource.Monotonic,
 ) : ViewModel() {
     // Writes must finish even if the user leaves right after tapping (Back within the 700 ms debounce),
     // so not viewModelScope, which is cancelled when the activity finishes.
@@ -190,11 +193,35 @@ internal class HomeModel(
     var error by mutableStateOf<String?>(null)
     var refreshing by mutableStateOf(false)
     var weather by mutableStateOf<Weather?>(null) // AccuWeather from the cloud; a TS7 reading wins for the temperature
-    private var weatherAt = 0L
+        private set
+    val outside get() = home?.outdoorTemp ?: weather?.temp
+    private val weatherLock = Mutex()
+    private var weatherAt: TimeMark? = null
     val days = mutableStateOf<List<DaySummary>?>(null) // History tab, kept across navigation
     private val pending = mutableMapOf<String, Job>() // debounced writes per room id
+    /** The background check's state, for the window and not-warming notices; null when alerts are off or the
+     *  last check is older than two of its runs (the phone may have kept the worker from running). */
+    var watched by mutableStateOf<WatchState?>(null)
+        private set
+    var warmAbove by mutableStateOf(warmSetting(settings)) // re-read on every load, so a changed setting shows on return
+        private set
+    /** Room notice keys shown last time, so they clear half a degree past where they appeared (no flapping). */
+    var shownIssues by mutableStateOf(emptySet<String>())
+    /** Notices the user closed (Notices.kt); forgotten once their condition is gone. */
+    var closed by mutableStateOf(decodeSet(settings.getString("notices.closed", "")))
+        private set
+
+    fun close(key: String) = saveClosed(closed + key)
+    fun forgetClosed(active: Set<String>) = (closed intersect active).let { if (it != closed) saveClosed(it) }
+    private fun saveClosed(keys: Set<String>) {
+        closed = keys
+        settings.putString("notices.closed", keys.joinToString(","))
+    }
 
     suspend fun load() {
+        // Also on failure: a phone offline for hours mustn't keep showing an old window warning.
+        watched = if (alertsEnabled(settings)) loadWatch(settings).takeIf { nowSeconds() - it.lastAt <= WINDOW_MAX_GAP } else null
+        warmAbove = warmSetting(settings)
         attempt { api.home(key) }
             .onSuccess { fresh ->
                 if (savedAuthKey(settings) != key) return
@@ -218,6 +245,10 @@ internal class HomeModel(
         restoreExpiredBoosts()
         if (!awayBusy) away =
             awaySaved(settings) != null // goAway saves first, but shows away only once done
+        pollRooms()
+    }
+
+    suspend fun pollRooms() {
         load()
         loadWeather(force = false)
     }
@@ -253,13 +284,15 @@ internal class HomeModel(
         }
     }
 
-    // Limit automatic weather requests to one every 15 minutes across foreground entries.
-    private suspend fun loadWeather(force: Boolean) {
-        if (!force && nowSeconds() - weatherAt <= 15 * 60) return
-        weatherAt = nowSeconds()
-        attempt { api.weather(key) }
-            .onSuccess { weather = it }
+    // Share the weather limit across polling and resume, and discard an expired reading before retrying.
+    private suspend fun loadWeather(force: Boolean) = weatherLock.withLock {
+        val recent = weatherAt?.elapsedNow()?.let { it < 15.minutes } == true
+        if (!force && recent) return@withLock
+        if (!recent) weather = null
+        weather = attempt { api.weather(key) }
             .onFailure { log("weather failed", it) }
+            .getOrNull()
+        weatherAt = weatherClock.markNow()
     }
 
     /** Lowers every room that is on to [awayTemp] and remembers what each one had. */
@@ -446,7 +479,7 @@ private fun Main(
                 }
                 model.refreshOnResume()
                 // Slow poll, only while the Rooms tab is on screen
-                while (true) { delay(2.minutes); model.refreshRooms() }
+                while (true) { delay(2.minutes); model.pollRooms() }
             }
         }
     }
@@ -514,11 +547,12 @@ private fun Main(
                                 onSmartChanged = model::refreshRooms,
                                 ac = acs.room(room.id),
                                 acCard = { ac ->
-                                    AcCard(
-                                        room, ac, { acs.set(room.id, it) },
-                                        onHeatingOff = { model.heatingOff(room) { showScheduleTip = true } },
-                                        onRemove = { acs.unlink(room.id) },
-                                    )
+                                    AcCard(ac, { acs.set(room.id, it) }, onRemove = { acs.unlink(room.id) })
+                                },
+                                acWarning = { ac ->
+                                    if (fighting(room, ac.state)) AcFightCard(room, model.outside, { acs.set(room.id, it) }, busy = acs.busy(room.id)) {
+                                        model.heatingOff(room) { showScheduleTip = true }
+                                    }
                                 },
                             ) { backStack.removeLastOrNull() }
                         }
@@ -703,6 +737,7 @@ private fun RoomsTab(
     model: HomeModel, acs: AcModel, discoverAc: (() -> Unit)?, onScheduleLocked: () -> Unit, openRoom: (String) -> Unit,
 ) {
     var acSheet by rememberSaveable { mutableStateOf<String?>(null) } // room id
+    val notices = roomNotices(model, acs, discoverAc, onScheduleLocked, openRoom)
     val scroll = collapsingBar()
     val pull = rememberPullToRefreshState()
     Scaffold(
@@ -724,7 +759,7 @@ private fun RoomsTab(
                                 )
                             }
                         }
-                        val outside = h?.outdoorTemp ?: model.weather?.temp
+                        val outside = model.outside
                         if (outside != null) WeatherPill(
                             model.weather?.emoji,
                             outside,
@@ -772,14 +807,6 @@ private fun RoomsTab(
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         val span = StaggeredGridItemSpan.FullLine
-                        model.error?.let { e ->
-                            item(span = span) {
-                                Text(
-                                    e,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                            }
-                        }
                         if (model.away) item(span = span) {
                             AwayOnCard(
                                 model.awayTemp,
@@ -806,13 +833,19 @@ private fun RoomsTab(
                                 model.awayBusy,
                             ) { model.goAway { acs.setAway(true) } }
                         }
-                        if (h.rooms.isNotEmpty()) {
-                            val ac = acs.found.firstOrNull()
-                            if (ac != null) item(span = span, key = "ac-${ac.mac}") {
-                                AcFoundCard(h.rooms, acs.binding, acs.minimized, Modifier.springIn(2), { acs.assign(ac, it) }, acs::minimize)
+                        // The notification area: errors, warnings, suggestions, most severe first (Notices.kt).
+                        notices.forEach { n ->
+                            item(span = span, key = n.key) {
+                                NoticeCard(n, Modifier.springIn(2), if (n.closable) ({ model.close(n.key) }) else null)
                             }
-                            else if (discoverAc != null) item(span = span, key = "ac-discovery") {
-                                AcDiscoveryCard(acs.discovering, enabled = !acs.discovering && !acs.binding, onDiscover = discoverAc)
+                        }
+                        if (discoverAc != null && h.rooms.isNotEmpty() && acs.found.isEmpty() && "ac-discovery" in model.closed) {
+                            item(span = span) {
+                                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                                    TextButton(discoverAc, enabled = !acs.discovering && !acs.binding) {
+                                        Text(stringResource(if (acs.discovering) Res.string.ac_discovering else Res.string.ac_discover))
+                                    }
+                                }
                             }
                         }
                         itemsIndexed(h.rooms, key = { _, r -> r.id }) { i, r ->
@@ -825,7 +858,6 @@ private fun RoomsTab(
                                 ac = acs.room(r.id),
                                 onAcChange = { acs.set(r.id, it) },
                                 onAcMore = { acSheet = r.id },
-                                onHeatingOff = { model.heatingOff(r, onScheduleLocked) },
                                 onOpen = { openRoom(r.id) }) { t -> model.setTarget(r, t) }
                         }
                         if (h.rooms.isEmpty()) item(span = span) { Text(stringResource(Res.string.no_rooms)) }
@@ -838,9 +870,13 @@ private fun RoomsTab(
     val sheetAc = acSheet?.let { acs.room(it) }
     if (sheetRoom != null && sheetAc != null) AcSheet(
         sheetRoom, sheetAc, { acs.set(sheetRoom.id, it) },
-        onHeatingOff = { model.heatingOff(sheetRoom, onScheduleLocked) },
         onRemove = { acs.unlink(sheetRoom.id); acSheet = null },
-    ) { acSheet = null }
+        onDismiss = { acSheet = null },
+    ) {
+        if (fighting(sheetRoom, sheetAc.state)) AcFightCard(sheetRoom, model.outside, { acs.set(sheetRoom.id, it) }, Modifier.padding(bottom = 8.dp), acs.busy(sheetRoom.id)) {
+            model.heatingOff(sheetRoom, onScheduleLocked)
+        }
+    }
 }
 
 @Composable
@@ -1224,7 +1260,7 @@ private fun LoginSteps(title: StringResource, steps: List<StringResource>) {
 }
 
 /** The AC card's "Turn heating off": a scheduled room can't be switched by hand, so explain why ([onLocked]). */
-private fun HomeModel.heatingOff(room: Room, onLocked: () -> Unit) {
+internal fun HomeModel.heatingOff(room: Room, onLocked: () -> Unit) {
     if (room.schedule) onLocked() else setTarget(room, null)
 }
 
@@ -1238,7 +1274,6 @@ private fun RoomCard(
     ac: AcView? = null, // the room's AC: its row goes under the heating row, and it drives the animations too
     onAcChange: (AcChange) -> Unit = {},
     onAcMore: () -> Unit = {}, // tapping the AC's name: mode and fan
-    onHeatingOff: () -> Unit = {}, // the chip shown while the heating works against the AC
     onOpen: () -> Unit,
     onTarget: (Double?) -> Unit
 ) {
@@ -1314,18 +1349,7 @@ private fun RoomCard(
                 ) {
                     if (on) TempStepper(room.target, onTarget, compact = true, onLocked = onScheduleLocked.takeIf { room.schedule })
                 }
-                AcRow(ac, onAcChange, onAcMore)
-                // The details' warning, one tap away: the tug of war alone doesn't say how to end it.
-                if (fighting(room, ac.state)) AssistChip(
-                    onHeatingOff, { Text(stringResource(Res.string.ac_fighting_short)) },
-                    Modifier.padding(top = 4.dp),
-                    leadingIcon = { Icon(FlameIcon, null, Modifier.size(AssistChipDefaults.IconSize)) },
-                    colors = AssistChipDefaults.assistChipColors(
-                        containerColor = scheme.errorContainer, labelColor = scheme.onErrorContainer,
-                        leadingIconContentColor = scheme.onErrorContainer,
-                    ),
-                    border = null,
-                )
+                AcRow(ac, fighting(room, ac.state), onAcChange, onAcMore)
             } else Row(verticalAlignment = Alignment.CenterVertically) {
                 RollingTemp(
                     room.current,

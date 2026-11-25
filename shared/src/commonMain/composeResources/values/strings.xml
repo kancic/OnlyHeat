@@ -218,8 +218,9 @@
     <string name="ac_fan_low">Low</string>
     <string name="ac_fan_medium">Medium</string>
     <string name="ac_fan_high">High</string>
-    <string name="ac_fighting">The heating in this room is set higher than the AC, so they will work against each other.</string>
-    <string name="ac_fighting_short">Heating works against the AC · Turn it off</string>
+    <string name="ac_fighting">The heating and the AC in this room are working against each other.</string>
+    <string name="ac_turn_off">Turn off AC</string>
+    <string name="ac_fighting_cold">The AC is cooling against the heating in this room. In the cold season the heating should stay on.</string>
     <string name="ac_heating_off">Turn heating off</string>
     <string name="ac_remove">Remove from this room</string>
     <string name="ac_pill_away">Not home</string>
@@ -229,4 +230,8 @@
     <string name="ac_header_cooling">AC cooling</string>
     <string name="ac_header_on">AC on</string>
     <string name="floor_heating">Floor heating</string>
+    <string name="notice_window">%1$s is cooling down fast while it should heat. Is a window open?</string>
+    <string name="notice_open_room">Open room</string>
+    <string name="ac_turn_on">Turn on AC</string>
+    <string name="close">Close</string>
 </resources>

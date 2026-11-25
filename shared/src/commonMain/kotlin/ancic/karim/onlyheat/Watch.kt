@@ -104,14 +104,19 @@ sealed interface Alert {
 }
 
 const val WINDOW_DROP = 1.5 // °C between two checks while heating = probably an open window
-private const val WINDOW_MAX_GAP = 40 * 60 // only compare readings this close together (seconds)
+internal const val WINDOW_MAX_GAP = 40 * 60 // only compare readings this close together (seconds)
 // ponytail: guesses for slow (floor) heating; tune if real radiators flag too late or floors too early.
 const val NOT_WARMING_AFTER = 2 * 3600 // seconds below target without warming up before we say so
 const val MIN_RISE = 0.3 // °C that counts as "warming up"
 const val HOT_MARGIN = 2.0 // °C above target while the valve is still open = probably stuck open
 const val AC_ABOVE = 26.0 // default for the "Too warm above" setting
 
-private fun Room.isAcCandidate(warm: Set<String>, warmAbove: Double): Boolean {
+/** Well above target with the valve still open (probably stuck), and not cooled by the AC. [wasHot] clears it half
+ *  a degree lower (no flapping). */
+internal fun Room.isTooHot(t: Double, target: Double, wasHot: Boolean = false) =
+    !cooling && heating && t >= target + HOT_MARGIN - (if (wasHot) 0.5 else 0.0)
+
+internal fun Room.isAcCandidate(warm: Set<String>, warmAbove: Double): Boolean {
     val limit = if (id in warm) warmAbove - 0.5 else warmAbove
     return !heating && current != null && current >= limit
 }
@@ -167,7 +172,7 @@ fun watch(prev: WatchState, home: Home?, controllerOffline: Boolean, coldBelow: 
         }
         // Too hot: well above target and the valve still open. Without the valve check every lowered
         // target or sunny afternoon would trigger it. Clears half a degree lower (no flapping).
-        if (r.heating && (t >= target + HOT_MARGIN || (r.id in prev.hot && t >= target + HOT_MARGIN - 0.5))) {
+        if (r.isTooHot(t, target, wasHot = r.id in prev.hot)) {
             hot += r.id
             if (r.id !in prev.hot) alerts += Alert.TooHot(r.name, t, target)
         }

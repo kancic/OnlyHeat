@@ -219,8 +219,9 @@
     <string name="ac_fan_low">Niska</string>
     <string name="ac_fan_medium">Srednja</string>
     <string name="ac_fan_high">Visoka</string>
-    <string name="ac_fighting">Grijanje u ovoj prostoriji postavljeno je više od klime pa će raditi jedno protiv drugog.</string>
-    <string name="ac_fighting_short">Grijanje radi protiv klime · Ugasi ga</string>
+    <string name="ac_fighting">Grijanje i klima u ovoj prostoriji rade jedno protiv drugog.</string>
+    <string name="ac_turn_off">Isključi klimu</string>
+    <string name="ac_fighting_cold">Klima hladi protiv grijanja u ovoj prostoriji. U hladnom dijelu godine grijanje treba ostati upaljeno.</string>
     <string name="ac_heating_off">Ugasi grijanje</string>
     <string name="ac_remove">Makni iz ove prostorije</string>
     <string name="ac_pill_away">Niste doma</string>
@@ -230,4 +231,8 @@
     <string name="ac_header_cooling">klima hladi</string>
     <string name="ac_header_on">klima radi</string>
     <string name="floor_heating">Pod grije</string>
+    <string name="notice_window">%1$s: temperatura brzo pada iako bi se trebalo grijati. Je li otvoren prozor?</string>
+    <string name="notice_open_room">Otvori prostoriju</string>
+    <string name="ac_turn_on">Uključi klimu</string>
+    <string name="close">Zatvori</string>
 </resources>
