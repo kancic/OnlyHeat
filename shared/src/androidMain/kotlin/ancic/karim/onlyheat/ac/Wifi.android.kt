@@ -38,7 +38,12 @@ internal actual fun nearbyWifi(): List<NearbyWifi> {
     val bootMicros = SystemClock.elapsedRealtime() * 1000
     if (results.none { bootMicros - it.timestamp < 60_000_000 }) @Suppress("DEPRECATION") wifi.startScan()
     val now = nowSeconds()
-    return results.map { NearbyWifi(it.SSID, it.BSSID, it.frequency, it.level, now - (bootMicros - it.timestamp) / 1_000_000) }
+    // Android keeps reporting a network for a while after it's gone: only ones seen within 3 minutes of the newest
+    // result (the AC refresh runs every 2) count, so a reset AC's notice goes once fresh scans stop seeing it. Measured
+    // from the newest, not now: after a resume, or while Android refuses scans, the last results stay.
+    val newest = results.maxOfOrNull { it.timestamp } ?: return emptyList()
+    return results.filter { newest - it.timestamp < 180_000_000 }
+        .map { NearbyWifi(it.SSID, it.BSSID, it.frequency, it.level, now - (bootMicros - it.timestamp) / 1_000_000) }
 }
 
 // The SSID needs precise location too; without it Android says "<unknown ssid>".

@@ -313,13 +313,14 @@ private fun AlertsCard(modifier: Modifier, settings: Settings, enable: (Boolean)
     }
 }
 
-/** Spotting reset ACs by their own Wi-Fi. Shows the user's choice, not whether scans run, so it can be turned off
- *  without the permission. Turning it on asks for it (or opens the app's system settings once Android no longer asks);
- *  turning it off stops the Wi-Fi scans and the Rooms notice. */
+/** Spotting reset ACs by their own Wi-Fi. Shows the user's choice, so it can be turned off without the permission;
+ *  switched on but not permitted, the description says location is needed. Turning it on asks for the permission
+ *  (or opens the app's system settings once Android no longer asks); turning it off stops the scans and the notice. */
 @Composable
 private fun AcWifiCard(modifier: Modifier, access: AcWifiAccess) {
     val scope = rememberCoroutineScope()
-    Section(stringResource(Res.string.ac_wifi_setting_title), stringResource(Res.string.ac_wifi_setting_desc), AcIcon,
+    val desc = if (access.on && !access.granted) Res.string.ac_wifi_access_desc else Res.string.ac_wifi_setting_desc
+    Section(stringResource(Res.string.ac_wifi_setting_title), stringResource(desc), AcIcon,
         MaterialShapes.Cookie9Sided, accent = 1, modifier = modifier) {
         Switch(access.on, { on ->
             access.switch(on)

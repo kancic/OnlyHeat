@@ -76,7 +76,7 @@ internal expect fun currentWifi(): Pair<String, String>?
  *  nearer; [seenAt]: when the scan last saw it, in epoch seconds. */
 internal data class NearbyWifi(val ssid: String, val bssid: String, val mhz: Int, val dbm: Int, val seenAt: Long)
 
-/** Nearby Wi-Fi networks, seen without joining them; empty where the platform can't scan. */
+/** Nearby Wi-Fi networks seen within 3 minutes of the latest scan, without joining them; empty where the platform can't scan. */
 internal expect fun nearbyWifi(): List<NearbyWifi>
 
 /** Spotting a reset AC by its own Wi-Fi needs the platform's permission (Android: location, since Wi-Fi scan results

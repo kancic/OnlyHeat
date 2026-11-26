@@ -54,6 +54,7 @@ internal class AcViewModel(private val settings: Settings, private val key: Stri
     private val revisions = mutableMapOf<String, Long>()
     private val awayRooms = mutableStateSetOf<String>()
     private val wifiSent = mutableMapOf<String, Long>() // MAC -> when it was given the home Wi-Fi (epoch seconds)
+    private var lastReport: String? = null
     private var rescan = false // after a Wi-Fi send: the cached LAN scan may still hold the AC at its own Wi-Fi's address
     /** Away or I'm back is switching this room's AC, so [set] ignores changes until it's done. */
     fun busy(roomId: String) = roomId in awayRooms
@@ -69,9 +70,23 @@ internal class AcViewModel(private val settings: Settings, private val key: Stri
         if (nearby.isNotEmpty()) lanScanSucceeded = true
         val taken = linked.values.map { it.protocol to it.mac }.toSet()
         val wifi = if (scanWifi) attempt { nearbyWifi() }.getOrDefault(emptyList()) else emptyList()
-        val hotspots = wifi.mapNotNull { w ->
+        val now = nowSeconds()
+        // ponytail: neighbours' ACs drop into setup mode too, at -80 dBm and weaker; one being set up here is near.
+        // Lower the cutoff if a reset AC across a large home gets missed. A paired one is in this home at any signal.
+        val seen = wifi.mapNotNull { w ->
             // One sent the home Wi-Fi stays off the list until a scan sees its own Wi-Fi again after that.
-            hotspotOf(w.ssid, w.bssid)?.takeIf { w.seenAt > (wifiSent[it.mac] ?: 0L) }
+            hotspotOf(w.ssid, w.bssid)?.takeIf {
+                w.seenAt > (wifiSent[it.mac] ?: 0L) && (w.dbm >= -75 || (it.protocol to it.mac) in taken)
+            }?.let { w to it }
+        }
+        val hotspots = seen.map { it.second }
+        // Logged when which ACs are found changes, not every refresh (signal and age vary): why an AC card or the
+        // Wi-Fi notice shows up.
+        val report = "on the network: " + nearby.joinToString { "${it.mac} at ${it.host}" }.ifEmpty { "none" } +
+            "; on its own Wi-Fi: " + seen.joinToString { (w) -> "${w.ssid} (${w.bssid})" }.ifEmpty { "none" }
+        if (report != lastReport) {
+            lastReport = report
+            log("ACs $report" + seen.joinToString("") { (w) -> "; ${w.bssid}: ${w.dbm} dBm, seen ${now - w.seenAt} s ago" })
         }
         homeWifi = wifi.filter { it.mhz < 2500 && it.ssid.isNotBlank() && hotspotOf(it.ssid, it.bssid) == null }
             .sortedByDescending { it.dbm }.distinctBy { it.ssid } // strongest first: the home router, then neighbours
@@ -117,8 +132,9 @@ internal class AcViewModel(private val settings: Settings, private val key: Stri
         if (binding) return@launch
         binding = true
         try {
-            val bound = attempt { ac.bind() }.getOrElse {
-                log("AC bind failed", it)
+            // A module that just joined the home Wi-Fi can skip a few seconds of replies: ask it again.
+            val bound = attempt { ac.bind() }.let { if (it.isFailure && ac.mac in wifiSent) attempt { ac.bind() } else it }.getOrElse {
+                log("AC bind to ${ac.mac} at ${ac.host} failed", it)
                 updateFound(force = true)
                 launch { snackbar?.showSnackbar(getString(Res.string.ac_bind_failed)) }
                 return@launch
@@ -148,6 +164,7 @@ internal class AcViewModel(private val settings: Settings, private val key: Stri
             binding = false
         }
         if (sent) {
+            log("AC ${ac.mac}: sent the home Wi-Fi $ssid")
             wifiSent[ac.mac] = nowSeconds()
             rescan = true
             found -= ac
@@ -180,6 +197,7 @@ internal class AcViewModel(private val settings: Settings, private val key: Stri
         linked.keys.forEach(::invalidate)
         linked = emptyMap()
         found = emptyList()
+        lastReport = null
         lanScanSucceeded = false
         discoveryEnabled = false
     }

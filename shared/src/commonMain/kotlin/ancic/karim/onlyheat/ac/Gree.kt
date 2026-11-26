@@ -1,5 +1,6 @@
 package ancic.karim.onlyheat.ac
 
+import ancic.karim.onlyheat.data.log
 import ancic.karim.onlyheat.data.str
 import io.ktor.network.selector.SelectorManager
 import io.ktor.network.sockets.Datagram
@@ -87,6 +88,8 @@ internal object Gree : AcProtocol {
         throw AcUnreachable()
     }
 
+    private val logged = mutableSetOf<String>()
+
     // Asks each address directly: some units ignore broadcast scans.
     override suspend fun scan(hosts: List<String>): List<FoundAc> {
         val wifi = currentWifi()
@@ -95,6 +98,7 @@ internal object Gree : AcProtocol {
         return replies.mapNotNull { (host, reply) ->
             val dev = unpack(reply, GENERIC_KEY) ?: return@mapNotNull null
             val mac = dev.str("mac") ?: return@mapNotNull null
+            if (logged.add(mac)) log("Gree scan reply from $host: $dev") // once per AC; no key in it; ver tells the module firmware
             discovered(host, mac, dev.str("name") ?: mac, ap)
         }
     }
