@@ -21,6 +21,7 @@ android {
                 enable = true
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
             }
+            proguardFiles("proguard-rules.pro")
         }
     }
     // Lists English + Croatian under Settings → Apps → OnlyHeat → Language (Android 13+).

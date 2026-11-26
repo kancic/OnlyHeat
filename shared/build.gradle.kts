@@ -80,8 +80,13 @@ compose.resources {
 compose.desktop.application {
     mainClass = "ancic.karim.onlyheat.MainKt"
     // Daemon runs on Android Studio's JBR, which lacks jpackage; package with a full JDK (foojay fetches one if missing).
-    javaHome = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25); vendor = JvmVendorSpec.ADOPTIUM }
+    // Zulu, not Adoptium: Adoptium's JDK 25 ships no jmods (JEP 493), and ProGuard reads the JDK's classes from them.
+    javaHome = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25); vendor = JvmVendorSpec.AZUL }
         .get().metadata.installationPath.asFile.absolutePath
+    buildTypes.release.proguard {
+        configurationFiles.from(project.file("proguard-desktop.pro"))
+        optimize.set(false) // ProGuard's optimizer emits invalid bytecode in okio (VerifyError on every request); shrinking only
+    }
     nativeDistributions {
         targetFormats(TargetFormat.Dmg)
         packageName = "OnlyHeat"
