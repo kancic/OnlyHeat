@@ -10,4 +10,5 @@
     <string name="widget_more">+%1$d more</string>
     <string name="ac_turn_on">Turn on AC</string>
     <string name="ac_turn_on_failed">The air conditioner didn’t respond. Are you on your home Wi-Fi?</string>
+    <string name="update_ready">An OnlyHeat update is ready. Tap to install.</string>
 </resources>

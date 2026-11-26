@@ -7,6 +7,8 @@ import ancic.karim.onlyheat.ac.LocalAcWifi
 import ancic.karim.onlyheat.ac.fighting
 import ancic.karim.onlyheat.data.HOTSPOT
 import ancic.karim.onlyheat.data.HeatApi
+import ancic.karim.onlyheat.data.Update
+import ancic.karim.onlyheat.data.checkUpdate
 import ancic.karim.onlyheat.data.attempt
 import ancic.karim.onlyheat.data.clearSession
 import ancic.karim.onlyheat.data.noticeSession
@@ -65,6 +67,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
@@ -108,6 +111,7 @@ private enum class Tab(val label: StringResource, val icon: ImageVector) {
  * [statusBarOnDark] switches the status bar icons to light while a screen draws something dark behind them.
  * [hasLocalNetwork] reports local-network access for AC discovery, or null if the platform can't tell.
  * [acWifi] spots reset ACs by their own Wi-Fi where the platform can scan Wi-Fi (Android); rechecked on resume.
+ * [appVersion]: when set (release builds), a newer GitHub release is offered once per launch through [installUpdate].
  */
 @Composable
 fun App(
@@ -122,6 +126,8 @@ fun App(
     scheduleTipRequests: Flow<Unit> = emptyFlow(),
     hasLocalNetwork: () -> Boolean? = { true },
     acWifi: AcWifiAccess? = null,
+    appVersion: String? = null,
+    installUpdate: (Update) -> Unit = {},
 ) {
     if (acWifi != null) LifecycleResumeEffect(acWifi) { acWifi.recheck(); onPauseOrDispose {} }
     OnlyHeatTheme(dynamicScheme) { CompositionLocalProvider(LocalAcWifi provides acWifi) {
@@ -135,7 +141,7 @@ fun App(
                 requestLocalNetwork,
                 statusBarOnDark
             ) { pairing -> savePairing(settings, pairing); key = pairing.key }
-            else Main(api, k, requestLocalNetwork, hasLocalNetwork, notify, wakeAt, backgroundAlerts, notificationsAllowed, openNotificationSettings, scheduleTipRequests) {
+            else Main(api, k, requestLocalNetwork, hasLocalNetwork, notify, wakeAt, backgroundAlerts, notificationsAllowed, openNotificationSettings, scheduleTipRequests, appVersion, installUpdate) {
                 if (clearSession(settings, k)) key = null
             }
         }
@@ -160,6 +166,8 @@ private fun Main(
     notificationsAllowed: () -> Boolean,
     openNotificationSettings: () -> Unit,
     scheduleTipRequests: Flow<Unit>,
+    appVersion: String?,
+    installUpdate: (Update) -> Unit,
     onLogout: () -> Unit,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -211,6 +219,14 @@ private fun Main(
     }
     var showScheduleTip by rememberSaveable { mutableStateOf(false) }
     val host = model.home?.ip ?: HOTSPOT
+    LaunchedEffect(Unit) {
+        val update = appVersion?.let { v -> attempt { checkUpdate(v) }.getOrNull() } ?: return@LaunchedEffect
+        val install = model.snackbar.showSnackbar(
+            getString(Res.string.update_available, update.version), getString(Res.string.update_install),
+            withDismissAction = true, duration = SnackbarDuration.Long,
+        )
+        if (install == SnackbarResult.ActionPerformed) installUpdate(update)
+    }
     LaunchedEffect(scheduleTipRequests) {
         scheduleTipRequests.collect { showScheduleTip = true }
     }

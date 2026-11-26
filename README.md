@@ -28,6 +28,14 @@ Requires JDK 17+ and Android Studio (or just Gradle for Android and desktop).
 | iOS     | `cd iosApp && xcodegen && open OnlyHeat.xcodeproj`, then run from Xcode (iOS 16+, needs [XcodeGen](https://github.com/yonaskolb/XcodeGen)) |
 | Tests   | `./gradlew :shared:desktopTest` |
 
+## Releasing
+
+Push a tag (`git tag v1.2.0 && git push origin v1.2.0`). [`release.yml`](.github/workflows/release.yml) builds a
+signed APK and a `.dmg` and publishes a GitHub release. Release builds check for it on launch (Android also in the
+background worker) and offer to install it; Android 12+ updates without asking after the first self-install.
+Signing needs the `KEYSTORE_BASE64` / `KEYSTORE_PASSWORD` secrets; locally, `onlyheat.keystore` and
+`onlyheat.keystorePassword` in `~/.gradle/gradle.properties`.
+
 ## Project layout
 
 - `shared/` – all app code and UI (`commonMain`), with platform bits in `androidMain`, `iosMain`, `desktopMain`

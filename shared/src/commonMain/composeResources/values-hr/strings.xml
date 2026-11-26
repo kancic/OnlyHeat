@@ -272,4 +272,6 @@
     <string name="ac_turn_on">Uključi klimu</string>
     <string name="close">Zatvori</string>
     <string name="ac_mode">Način rada</string>
+    <string name="update_available">Dostupan je OnlyHeat %1$s.</string>
+    <string name="update_install">Instaliraj</string>
 </resources>

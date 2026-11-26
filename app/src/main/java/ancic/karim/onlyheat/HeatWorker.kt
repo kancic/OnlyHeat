@@ -5,6 +5,7 @@ import ancic.karim.onlyheat.data.ReadingDao
 import ancic.karim.onlyheat.data.alertsEnabled
 import ancic.karim.onlyheat.data.attempt
 import ancic.karim.onlyheat.data.checkAlerts
+import ancic.karim.onlyheat.data.checkUpdate
 import ancic.karim.onlyheat.data.endExpiredBoosts
 import ancic.karim.onlyheat.data.markFirmwareNotified
 import ancic.karim.onlyheat.data.savedAuthKey
@@ -21,6 +22,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.russhwolf.settings.Settings
 import org.koin.core.component.KoinComponent
+import org.koin.core.component.get
 import org.koin.core.component.inject
 import java.util.concurrent.TimeUnit
 
@@ -43,9 +45,20 @@ class HeatWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         }
         val boostsDone = attempt { endExpiredBoosts(api, savedAuthKey(settings), settings) }
             .onFailure { android.util.Log.w("OnlyHeat", "ending boosts failed", it) }.isSuccess
+        updateQuietly()
         refreshWidgets(applicationContext)
         return if (boostsDone || runAttemptCount >= 5) Result.success() else Result.retry()
     }
+}
+
+/** Installs a newer GitHub release in the background; each version is tried once, the app's snackbar offers it again. */
+private suspend fun HeatWorker.updateQuietly() {
+    val current = applicationContext.updatableVersion() ?: return
+    val settings: Settings = get()
+    val update = attempt { checkUpdate(current) }.getOrNull() ?: return
+    if (settings.getStringOrNull("updateTried") == update.version) return
+    settings.putString("updateTried", update.version)
+    attempt { applicationContext.installUpdate(update) }.onFailure { android.util.Log.w("OnlyHeat", "update failed", it) }
 }
 
 private val online = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()

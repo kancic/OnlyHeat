@@ -271,4 +271,6 @@
     <string name="ac_turn_on">Turn on AC</string>
     <string name="close">Close</string>
     <string name="ac_mode">Mode</string>
+    <string name="update_available">OnlyHeat %1$s is available.</string>
+    <string name="update_install">Install</string>
 </resources>

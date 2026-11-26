@@ -11,12 +11,25 @@ android {
         applicationId = "ancic.karim.onlyheat"
         minSdk = 30
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        val version = providers.gradleProperty("appVersion").get()
+        versionName = version
+        versionCode = version.split('.').fold(0) { code, part -> code * 100 + part.toInt() } // 1.2.3 -> 10203
+    }
+
+    // The release key lives outside the repo: ~/.gradle/gradle.properties locally, GitHub secrets in release.yml.
+    val keystore = providers.gradleProperty("onlyheat.keystore").orNull
+    if (keystore != null) signingConfigs.create("release") {
+        storeFile = file(keystore)
+        storePassword = providers.gradleProperty("onlyheat.keystorePassword").get()
+        keyAlias = "onlyheat"
+        keyPassword = storePassword
     }
 
     buildTypes {
+        // Own app id, so Studio builds (debug key) live beside the self-updating release app (release key).
+        debug { applicationIdSuffix = ".debug" }
         release {
+            signingConfig = signingConfigs.findByName("release")
             optimization {
                 enable = true
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")

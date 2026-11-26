@@ -90,6 +90,7 @@ compose.desktop.application {
     nativeDistributions {
         targetFormats(TargetFormat.Dmg)
         packageName = "OnlyHeat"
+        packageVersion = providers.gradleProperty("appVersion").get() // CI passes the tag; see gradle.properties
         macOS {
             iconFile.set(rootProject.file("icons/onlyheat.icns"))
             bundleID = "ancic.karim.onlyheat"

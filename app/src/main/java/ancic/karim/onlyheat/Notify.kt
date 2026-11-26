@@ -14,8 +14,8 @@ import android.os.Build
 internal const val ALERTS_CHANNEL = "alerts"
 
 /** Posts a notification that opens the app; returns false (posting nothing) without the notification permission.
- *  [acLinks]: the pairings a "Turn on AC" button cools (the AC tip). */
-fun Context.notifyHeat(text: String, alert: Boolean = false, acLinks: List<String> = emptyList()): Boolean {
+ *  [acLinks]: the pairings a "Turn on AC" button cools (the AC tip). [open]: what a tap opens instead of the app. */
+fun Context.notifyHeat(text: String, alert: Boolean = false, acLinks: List<String> = emptyList(), open: Intent? = null): Boolean {
     if (Build.VERSION.SDK_INT >= 33 &&
         checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
     ) return false
@@ -28,7 +28,10 @@ fun Context.notifyHeat(text: String, alert: Boolean = false, acLinks: List<Strin
         else NotificationChannel(channel, getString(R.string.channel_setpoints), NotificationManager.IMPORTANCE_DEFAULT)
     )
     if (nm.getNotificationChannel(channel)?.importance == NotificationManager.IMPORTANCE_NONE) return false // turned off by the user
-    val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+    // UPDATE_CURRENT: a newer update prompt replaces the extras of the previous one.
+    val tap = PendingIntent.getActivity(
+        this, 0, open ?: Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
     val id = text.hashCode() // ponytail: same text replaces itself; a per-room id if rooms ever need separate entries
     nm.notify(
         id,
@@ -37,7 +40,7 @@ fun Context.notifyHeat(text: String, alert: Boolean = false, acLinks: List<Strin
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
-            .setContentIntent(open)
+            .setContentIntent(tap)
             .setAutoCancel(true)
             .apply {
                 if (acLinks.isNotEmpty()) {
