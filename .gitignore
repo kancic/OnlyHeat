@@ -27,3 +27,6 @@ DerivedData/
 iosApp/build/
 iosApp/OnlyHeat.xcodeproj/
 iosApp/OnlyHeat/Info.plist
+
+# Captured vendor dashboard/cloud snapshots (third-party code, keep local)
+docs/*-snapshot-*/
