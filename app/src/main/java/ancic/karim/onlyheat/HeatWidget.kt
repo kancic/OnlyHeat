@@ -1,5 +1,17 @@
 package ancic.karim.onlyheat
 
+import ancic.karim.onlyheat.data.HeatApi
+import ancic.karim.onlyheat.data.Home
+import ancic.karim.onlyheat.data.Room
+import ancic.karim.onlyheat.data.attempt
+import ancic.karim.onlyheat.data.deg
+import ancic.karim.onlyheat.data.noticeSession
+import ancic.karim.onlyheat.data.saveWriteNotice
+import ancic.karim.onlyheat.data.savedAuthKey
+import ancic.karim.onlyheat.ui.MAX_T
+import ancic.karim.onlyheat.ui.MIN_T
+import ancic.karim.onlyheat.ui.STEP
+import ancic.karim.onlyheat.ui.keptMessage
 import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -16,22 +28,18 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
+import androidx.glance.LocalSize
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionParametersOf
+import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
-import androidx.glance.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
-import androidx.glance.LocalSize
-import androidx.glance.appwidget.SizeMode
-import androidx.glance.unit.ColorProvider
-import androidx.glance.layout.fillMaxHeight
-import androidx.glance.layout.height
-import androidx.glance.text.TextAlign
 import androidx.glance.appwidget.provideContent
 import androidx.glance.appwidget.state.getAppWidgetState
 import androidx.glance.appwidget.state.updateAppWidgetState
@@ -42,19 +50,24 @@ import androidx.glance.layout.Box
 import androidx.glance.layout.Column
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
+import androidx.glance.layout.fillMaxHeight
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
+import androidx.glance.layout.height
 import androidx.glance.layout.padding
 import androidx.glance.layout.size
 import androidx.glance.layout.width
 import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
+import androidx.glance.text.TextAlign
 import androidx.glance.text.TextStyle
-import kotlinx.coroutines.delay
+import androidx.glance.unit.ColorProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.koin.mp.KoinPlatform
+
 
 // Glance builds receivers and callbacks itself, so they look up the shared instances.
 private val api: HeatApi get() = KoinPlatform.getKoin().get()
@@ -173,7 +186,7 @@ private fun Content(context: Context, state: WidgetState, prefs: Preferences) {
 @Composable
 private fun Header(home: Home?) {
     Text(
-        listOfNotNull(home?.device ?: "OnlyHeat", home?.outdoorTemp?.let { "${fmt1(it)}°" }).joinToString(" · "),
+        listOfNotNull(home?.device ?: "OnlyHeat", home?.outdoorTemp?.let { deg(it) }).joinToString(" · "),
         GlanceModifier.padding(start = 6.dp, bottom = 4.dp),
         style = TextStyle(color = GlanceTheme.colors.primary, fontSize = 13.sp, fontWeight = FontWeight.Bold),
         maxLines = 1,
@@ -206,7 +219,7 @@ private fun RoomCard(room: Room, target: Double?, modifier: GlanceModifier) {
                 style = TextStyle(color = fg, fontSize = 12.sp, fontWeight = FontWeight.Medium),
                 maxLines = 1,
             )
-            room.current?.let { Text("${fmt1(it)}°", style = TextStyle(color = fg, fontSize = 13.sp, fontWeight = FontWeight.Bold)) }
+            room.current?.let { Text(deg(it), style = TextStyle(color = fg, fontSize = 13.sp, fontWeight = FontWeight.Bold)) }
         }
         Spacer(GlanceModifier.height(2.dp))
         if (target == null) Text(
@@ -216,7 +229,7 @@ private fun RoomCard(room: Room, target: Double?, modifier: GlanceModifier) {
         else Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             StepButton("−", room, (target - STEP).coerceAtLeast(MIN_T), enabled = !room.schedule)
             Text(
-                "${fmt1(target)}°", GlanceModifier.defaultWeight(),
+                deg(target), GlanceModifier.defaultWeight(),
                 style = TextStyle(color = fg, fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
                 maxLines = 1,
             )

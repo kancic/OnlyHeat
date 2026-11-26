@@ -1,5 +1,7 @@
 package ancic.karim.onlyheat
 
+import ancic.karim.onlyheat.data.alertsEnabled
+import ancic.karim.onlyheat.data.savedAuthKey
 import android.Manifest
 import android.app.NotificationManager
 import android.content.Intent
@@ -15,6 +17,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.core.view.WindowCompat
+import com.russhwolf.settings.Settings
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
@@ -22,7 +25,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.get
-import com.russhwolf.settings.Settings
+
 
 internal const val SCHEDULE_TIP_EXTRA = "ancic.karim.onlyheat.SCHEDULE_TIP"
 

@@ -1,10 +1,15 @@
 package ancic.karim.onlyheat
 
+import ancic.karim.onlyheat.data.HeatApi
+import ancic.karim.onlyheat.data.Reading
+import ancic.karim.onlyheat.data.ReadingDao
+import ancic.karim.onlyheat.feature.rooms.HomeViewModel
 import com.russhwolf.settings.Settings
 import org.koin.core.parameter.parametersOf
 import org.koin.dsl.koinApplication
 import org.koin.dsl.module
 import kotlin.test.Test
+
 
 class DiTest {
     /** Koin only finds a missing binding at runtime: resolve everything the app asks for. */
@@ -22,7 +27,7 @@ class DiTest {
         val koin = koinApplication { modules(appModule, noDb) }.koin
         koin.get<HeatApi>()
         koin.get<Settings>()
-        koin.get<HomeModel> { parametersOf("key") }
+        koin.get<HomeViewModel> { parametersOf("key") }
         koin.close()
     }
 }

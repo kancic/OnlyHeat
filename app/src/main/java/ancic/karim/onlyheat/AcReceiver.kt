@@ -1,5 +1,6 @@
 package ancic.karim.onlyheat
 
+import ancic.karim.onlyheat.ac.coolRooms
 import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -11,6 +12,7 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
+
 
 /** "Turn on AC" on the AC tip notification: cools those rooms without opening the app. */
 class AcReceiver : BroadcastReceiver(), KoinComponent {

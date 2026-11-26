@@ -10,7 +10,7 @@ React Native with Hermes bytecode v96). The endpoint list and parameters come fr
 [`cloud-snapshot-1.0.3/`](cloud-snapshot-1.0.3/), with auth keys, PINs, serials and public IPs redacted. When this
 document and the snapshot disagree, the snapshot is right.
 
-OnlyHeat uses this API in `shared/src/commonMain/kotlin/ancic/karim/onlyheat/Api.kt`. The local dashboard is
+OnlyHeat uses this API in `shared/src/commonMain/kotlin/ancic/karim/onlyheat/data/Api.kt`. The local dashboard is
 documented separately in [`dashboard-api-1.0.7.0.8.md`](dashboard-api-1.0.7.0.8.md) and
 [`dashboard-api-1.0.9.2.0.md`](dashboard-api-1.0.9.2.0.md). §7 of the first one maps dashboard features to these
 endpoints.

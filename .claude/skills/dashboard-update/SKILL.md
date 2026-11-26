@@ -22,7 +22,7 @@ Every firmware gets its own doc and raw snapshot in `docs/`:
 - `docs/dashboard-api-<version>.md`: what changed since the previous version.
 - `docs/dashboard-snapshot-<version>/`: the raw capture of that version.
 
-The app code that depends on the dashboard is `shared/src/commonMain/kotlin/ancic/karim/onlyheat/Discover.kt`
+The app code that depends on the dashboard is `shared/src/commonMain/kotlin/ancic/karim/onlyheat/data/Discover.kt`
 (finding and recognising the controller) and `LocalApi.kt` (login, schedule, API PIN, reboot).
 
 ### 1. Detect
@@ -73,7 +73,7 @@ Ignore live values: temperatures, clock, login history, weather and chart data. 
 Run the app's real code with a temporary desktop test, then delete the test file.
 
 ```kotlin
-// shared/src/desktopTest/kotlin/ancic/karim/onlyheat/LiveFirmwareCheck.kt — temporary, delete after the run
+// shared/src/desktopTest/kotlin/ancic/karim/onlyheat/data/LiveFirmwareCheck.kt — temporary, delete after the run
 class LiveFirmwareCheck {
     @Test fun live() = runBlocking {
         val node = java.util.prefs.Preferences.userRoot().node("onlyheat-livecheck")
@@ -88,7 +88,7 @@ class LiveFirmwareCheck {
 ```
 
 ```sh
-./gradlew :shared:desktopTest --tests 'ancic.karim.onlyheat.LiveFirmwareCheck' -i | grep -E 'LIVE|FAILED|Exception'
+./gradlew :shared:desktopTest --tests 'ancic.karim.onlyheat.data.LiveFirmwareCheck' -i | grep -E 'LIVE|FAILED|Exception'
 ```
 
 `LocalApi`'s signatures change over time. Read the file first and adapt the test. Never call `rebootAndWait()`
@@ -124,7 +124,7 @@ Every app version gets its own doc and raw snapshot in `docs/`:
 - `docs/cloud-snapshot-<version>/`: the redacted replies of every read endpoint, `probe.txt` (error cases and
   transport variations), `endpoints.txt` (the endpoints and params the app sends) and `version.txt`.
 
-The app code that depends on the cloud is `shared/src/commonMain/kotlin/ancic/karim/onlyheat/Api.kt`.
+The app code that depends on the cloud is `shared/src/commonMain/kotlin/ancic/karim/onlyheat/data/Api.kt`.
 
 ### B1. Detect
 

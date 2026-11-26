@@ -22,7 +22,7 @@ Raw HTML of every page and modal, plus `app.js` and the server's `.htaccess`, is
 [`dashboard-snapshot-1.0.7.0.8/`](dashboard-snapshot-1.0.7.0.8/). The API PIN is redacted there. When this document and the snapshot
 disagree, the snapshot is right.
 
-OnlyHeat uses this dashboard in `shared/src/commonMain/kotlin/ancic/karim/onlyheat/LocalApi.kt` (login, schedule,
+OnlyHeat uses this dashboard in `shared/src/commonMain/kotlin/ancic/karim/onlyheat/data/LocalApi.kt` (login, schedule,
 API PIN, reboot) and `Discover.kt` (finding the controller, Wi-Fi name).
 
 ---
