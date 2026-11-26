@@ -67,7 +67,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.StringResource
-import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
@@ -111,7 +110,7 @@ private enum class Tab(val label: StringResource, val icon: ImageVector) {
  * [statusBarOnDark] switches the status bar icons to light while a screen draws something dark behind them.
  * [hasLocalNetwork] reports local-network access for AC discovery, or null if the platform can't tell.
  * [acWifi] spots reset ACs by their own Wi-Fi where the platform can scan Wi-Fi (Android); rechecked on resume.
- * [appVersion]: when set (release builds), a newer GitHub release is offered once per launch through [installUpdate].
+ * [appVersion]: when set (release builds), a newer GitHub release is offered as a Rooms notice that runs [installUpdate].
  */
 @Composable
 fun App(
@@ -127,7 +126,7 @@ fun App(
     hasLocalNetwork: () -> Boolean? = { true },
     acWifi: AcWifiAccess? = null,
     appVersion: String? = null,
-    installUpdate: (Update) -> Unit = {},
+    installUpdate: suspend (Update, onProgress: (Float) -> Unit) -> Unit = { _, _ -> },
 ) {
     if (acWifi != null) LifecycleResumeEffect(acWifi) { acWifi.recheck(); onPauseOrDispose {} }
     OnlyHeatTheme(dynamicScheme) { CompositionLocalProvider(LocalAcWifi provides acWifi) {
@@ -167,7 +166,7 @@ private fun Main(
     openNotificationSettings: () -> Unit,
     scheduleTipRequests: Flow<Unit>,
     appVersion: String?,
-    installUpdate: (Update) -> Unit,
+    installUpdate: suspend (Update, onProgress: (Float) -> Unit) -> Unit,
     onLogout: () -> Unit,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -219,13 +218,9 @@ private fun Main(
     }
     var showScheduleTip by rememberSaveable { mutableStateOf(false) }
     val host = model.home?.ip ?: HOTSPOT
-    LaunchedEffect(Unit) {
-        val update = appVersion?.let { v -> attempt { checkUpdate(v) }.getOrNull() } ?: return@LaunchedEffect
-        val install = model.snackbar.showSnackbar(
-            getString(Res.string.update_available, update.version), getString(Res.string.update_install),
-            withDismissAction = true, duration = SnackbarDuration.Long,
-        )
-        if (install == SnackbarResult.ActionPerformed) installUpdate(update)
+    model.installUpdate = installUpdate
+    LaunchedEffect(model) {
+        if (model.update == null) model.update = appVersion?.let { v -> attempt { checkUpdate(v) }.getOrNull() }
     }
     LaunchedEffect(scheduleTipRequests) {
         scheduleTipRequests.collect { showScheduleTip = true }

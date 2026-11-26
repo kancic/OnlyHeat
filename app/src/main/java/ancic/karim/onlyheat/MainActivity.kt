@@ -22,7 +22,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.core.view.WindowCompat
-import androidx.lifecycle.lifecycleScope
 import com.russhwolf.settings.Settings
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -105,11 +104,8 @@ class MainActivity : ComponentActivity() {
                 hasLocalNetwork = ::hasLocalNetwork,
                 acWifi = acWifi,
                 appVersion = updatableVersion(),
-                installUpdate = { u ->
-                    lifecycleScope.launch {
-                        runCatching { installUpdate(u) }.onFailure { android.util.Log.w("OnlyHeat", "update download failed", it) }
-                    }
-                },
+                // The app context: the download outlives a rotation (it runs in HomeViewModel's scope).
+                installUpdate = { u, onProgress -> applicationContext.installUpdate(u, onProgress) },
             )
         }
     }

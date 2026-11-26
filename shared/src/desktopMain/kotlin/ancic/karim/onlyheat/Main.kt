@@ -16,7 +16,7 @@ fun main() {
                 // Set by the packaged .dmg app only, so `gradlew run` never offers updates.
                 appVersion = System.getProperty("jpackage.app-version"),
                 // ponytail: the browser downloads the new .dmg and the user drags it over; no in-place replace on macOS.
-                installUpdate = { u -> u.urls.find { it.endsWith(".dmg") }?.let { Desktop.getDesktop().browse(URI(it)) } },
+                installUpdate = { u, _ -> u.urls.find { it.endsWith(".dmg") }?.let { Desktop.getDesktop().browse(URI(it)) } },
             )
         }
     }

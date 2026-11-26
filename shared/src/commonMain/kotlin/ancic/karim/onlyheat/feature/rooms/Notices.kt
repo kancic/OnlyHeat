@@ -23,6 +23,7 @@ import ancic.karim.onlyheat.ui.AcIcon
 import ancic.karim.onlyheat.ui.AirIcon
 import ancic.karim.onlyheat.ui.CloseIcon
 import ancic.karim.onlyheat.ui.CloudOffIcon
+import ancic.karim.onlyheat.ui.DownloadIcon
 import ancic.karim.onlyheat.ui.FlameIcon
 import ancic.karim.onlyheat.ui.Section
 import ancic.karim.onlyheat.ui.ThermostatIcon
@@ -62,6 +63,7 @@ internal class Notice(
     val actions: List<NoticeAction> = emptyList(),
     val custom: (@Composable (Modifier, onClose: (() -> Unit)?) -> Unit)? = null,
     val closable: Boolean = level >= Level.Suggestion,
+    val progress: Float? = null, // shown as a bar in place of the actions
 )
 
 /** A Settings card ([Section]): errors and warnings tinted with a badge in their own ink, suggestions and info
@@ -78,7 +80,9 @@ internal fun NoticeCard(n: Notice, modifier: Modifier = Modifier, onClose: (() -
     Section(
         n.title, n.text, n.icon, MaterialShapes.Cookie9Sided, accent = if (n.level == Level.Info) 1 else 0,
         modifier = modifier, container = container, ink = ink,
-        below = if (n.actions.isEmpty()) null else ({
+        below = if (n.progress != null) ({
+            LinearWavyProgressIndicator({ n.progress }, Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp))
+        }) else if (n.actions.isEmpty()) null else ({
             Row(Modifier.align(Alignment.End).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 n.actions.forEach { a ->
                     FilledTonalButton(a.onClick, enabled = a.enabled, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) { Text(a.label) }
@@ -229,6 +233,15 @@ internal fun roomNotices(
                     }.orEmpty())
             }
         }
+    }
+    model.update?.let { u ->
+        // The version in the key: closing hides this release only, the next one shows again.
+        val progress = model.updateProgress
+        list += Notice("update-${u.version}", Level.Suggestion,
+            if (progress == null) stringResource(Res.string.update_available, u.version)
+            else stringResource(Res.string.update_downloading, u.version, (progress * 100).toInt()),
+            icon = DownloadIcon, actions = listOf(NoticeAction(stringResource(Res.string.update_install)) { model.startUpdate(u) }),
+            closable = progress == null, progress = progress)
     }
     model.firmwareChange?.let { (old, new) ->
         list += Notice("firmware", Level.Info, stringResource(Res.string.firmware_changed_desc, old, new),

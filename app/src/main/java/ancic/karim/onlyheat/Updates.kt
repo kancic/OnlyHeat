@@ -23,7 +23,7 @@ fun Context.updatableVersion(): String? =
  * Downloads [update]'s APK and hands it to the system installer; [UpdateReceiver] gets the outcome.
  * Android 12+ installs without asking once OnlyHeat installed itself the first time; until then it asks.
  */
-suspend fun Context.installUpdate(update: Update) = withContext(Dispatchers.IO) {
+suspend fun Context.installUpdate(update: Update, onProgress: (Float) -> Unit = {}) = withContext(Dispatchers.IO) {
     val apk = update.urls.find { it.endsWith(".apk") } ?: return@withContext
     val installer = packageManager.packageInstaller
     val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
@@ -32,8 +32,20 @@ suspend fun Context.installUpdate(update: Update) = withContext(Dispatchers.IO) 
     try {
         installer.openSession(id).use { session ->
             // GitHub redirects https -> https, which HttpURLConnection follows.
-            URL(apk).openStream().use { input ->
-                session.openWrite("OnlyHeat.apk", 0, -1).use { input.copyTo(it); session.fsync(it) }
+            val download = URL(apk).openConnection()
+            download.getInputStream().use { input ->
+                val total = download.contentLengthLong // of the final response, after the redirect
+                session.openWrite("OnlyHeat.apk", 0, total).use { out ->
+                    val buffer = ByteArray(64 * 1024)
+                    var done = 0L
+                    while (true) {
+                        val n = input.read(buffer).takeIf { it >= 0 } ?: break
+                        out.write(buffer, 0, n)
+                        done += n
+                        if (total > 0) withContext(Dispatchers.Main) { onProgress(done.toFloat() / total) }
+                    }
+                    session.fsync(out)
+                }
             }
             // Mutable: the installer adds the status extras.
             val status = PendingIntent.getBroadcast(

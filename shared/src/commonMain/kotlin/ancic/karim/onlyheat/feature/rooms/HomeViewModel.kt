@@ -7,6 +7,7 @@ import ancic.karim.onlyheat.data.Home
 import ancic.karim.onlyheat.data.OperationNotice
 import ancic.karim.onlyheat.data.ReadingDao
 import ancic.karim.onlyheat.data.Room
+import ancic.karim.onlyheat.data.Update
 import ancic.karim.onlyheat.data.WINDOW_MAX_GAP
 import ancic.karim.onlyheat.data.WatchState
 import ancic.karim.onlyheat.data.Weather
@@ -85,6 +86,21 @@ internal class HomeViewModel(
     var wakeAt: ((Long) -> Unit)? = null
     var notificationsAllowed by mutableStateOf(true) // re-checked on resume
     var openNotificationSettings: () -> Unit = {}
+    /** A newer GitHub release (App.kt checks once per launch), offered as a notice that runs [installUpdate]. */
+    var update by mutableStateOf<Update?>(null)
+    var installUpdate: suspend (Update, onProgress: (Float) -> Unit) -> Unit = { _, _ -> }
+    /** The download's 0..1 while Install runs; null brings the button back (done, or failed so it can be retried). */
+    var updateProgress by mutableStateOf<Float?>(null)
+        private set
+
+    fun startUpdate(u: Update) {
+        if (updateProgress != null) return
+        updateProgress = 0f
+        scope.launch { // like the writes: finishes even if the user leaves meanwhile
+            attempt { installUpdate(u) { updateProgress = it } }.onFailure { log("update download failed", it) }
+            updateProgress = null
+        }
+    }
     val alertsOn get() = alertsEnabled(settings) // read on every composition: the switch is on another tab
     var onLoggedOut: () -> Unit = {}
     var away by mutableStateOf(awaySaved(settings) != null)
