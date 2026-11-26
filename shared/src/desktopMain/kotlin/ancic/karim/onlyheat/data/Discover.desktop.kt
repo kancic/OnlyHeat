@@ -19,6 +19,8 @@ private val macBootSession by lazy {
         ?.trim()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
 }
 
+internal actual val requiresLanConnection = false
+
 internal actual suspend fun currentLanConnection(): LanConnection? {
     if (!System.getProperty("os.name").startsWith("Mac")) return null
     return withContext(Dispatchers.IO) {

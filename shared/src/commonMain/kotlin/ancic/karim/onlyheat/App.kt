@@ -2,6 +2,8 @@ package ancic.karim.onlyheat
 
 import ancic.karim.onlyheat.ac.AcCard
 import ancic.karim.onlyheat.ac.AcViewModel
+import ancic.karim.onlyheat.ac.AcWifiAccess
+import ancic.karim.onlyheat.ac.LocalAcWifi
 import ancic.karim.onlyheat.ac.fighting
 import ancic.karim.onlyheat.data.HOTSPOT
 import ancic.karim.onlyheat.data.HeatApi
@@ -105,6 +107,7 @@ private enum class Tab(val label: StringResource, val icon: ImageVector) {
  * [openNotificationSettings]. Checked whenever the app resumes (the permission dialog and settings pause it).
  * [statusBarOnDark] switches the status bar icons to light while a screen draws something dark behind them.
  * [hasLocalNetwork] reports local-network access for AC discovery, or null if the platform can't tell.
+ * [acWifi] spots reset ACs by their own Wi-Fi where the platform can scan Wi-Fi (Android); rechecked on resume.
  */
 @Composable
 fun App(
@@ -118,8 +121,10 @@ fun App(
     statusBarOnDark: (Boolean) -> Unit = {},
     scheduleTipRequests: Flow<Unit> = emptyFlow(),
     hasLocalNetwork: () -> Boolean? = { true },
+    acWifi: AcWifiAccess? = null,
 ) {
-    OnlyHeatTheme(dynamicScheme) {
+    if (acWifi != null) LifecycleResumeEffect(acWifi) { acWifi.recheck(); onPauseOrDispose {} }
+    OnlyHeatTheme(dynamicScheme) { CompositionLocalProvider(LocalAcWifi provides acWifi) {
         Surface(Modifier.fillMaxSize()) {
             val settings = koinInject<Settings>()
             var key by remember { mutableStateOf(savedAuthKey(settings)) }
@@ -134,7 +139,7 @@ fun App(
                 if (clearSession(settings, k)) key = null
             }
         }
-    }
+    } }
 }
 
 /** Holds the logged-in session's ViewModels; see [Main]. */
@@ -159,6 +164,7 @@ private fun Main(
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val settings = koinInject<Settings>()
+    val acWifi = LocalAcWifi.current
     val session = noticeSession(settings)
     // This session's ViewModels live in their own store, cleared on logout (Main leaves while no key is saved),
     // so old sessions' models don't pile up in the activity's store; a recreation keeps them.
@@ -193,7 +199,7 @@ private fun Main(
                 launch {
                     while (true) {
                         lanAvailable = hasLocalNetwork()
-                        acs.refresh(lanAvailable)
+                        acs.refresh(lanAvailable, scanWifi = acWifi?.active == true)
                         delay(2.minutes)
                     }
                 }

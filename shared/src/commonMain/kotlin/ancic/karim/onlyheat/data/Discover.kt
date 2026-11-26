@@ -25,7 +25,9 @@ import kotlinx.serialization.json.jsonObject
 
 /** This device's IPv4 addresses on Wi-Fi/Ethernet (never mobile data or VPN), with their prefix length. */
 internal expect fun localIpv4s(): List<Pair<String, Int>>
+
 internal expect suspend fun currentLanConnection(): LanConnection?
+internal expect val requiresLanConnection: Boolean
 
 internal class LanConnection(
     val id: String,
@@ -245,13 +247,13 @@ internal suspend fun resolveDashboard(
         selected = selected,
     ) { candidate ->
         // Read again: the user may switch Wi-Fi while the picker is open.
-        val candidateConnection = candidate.connectionId?.let { id ->
-            currentLanConnection()?.takeIf { it.id == id } ?: return@dashboardAddress false
-        }
+        val candidateConnection = currentLanConnection()
+        if (candidateConnection == null && requiresLanConnection) return@dashboardAddress false
+        if (candidate.connectionId != null && candidateConnection?.id != candidate.connectionId) return@dashboardAddress false
         connection = candidateConnection
         dashboardProbeClient(candidateConnection).use { it.hasDashboard(candidate.host, candidate.name) }
     } ?: return null
-    return target to connection
+    return target.copy(connectionId = connection?.id) to connection
 }
 
 /** Hosts of each private network, once.

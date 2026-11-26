@@ -1,7 +1,6 @@
 package ancic.karim.onlyheat.ac
 
 import ancic.karim.onlyheat.data.str
-import ancic.karim.onlyheat.ui.Heat
 import io.ktor.network.selector.SelectorManager
 import io.ktor.network.sockets.Datagram
 import io.ktor.network.sockets.InetSocketAddress
@@ -89,12 +88,45 @@ internal object Gree : AcProtocol {
     }
 
     // Asks each address directly: some units ignore broadcast scans.
-    override suspend fun scan(hosts: List<String>) = udpExchange(hosts, PORT, """{"t":"scan"}""", 3.seconds)
-        .mapNotNull { (host, reply) ->
+    override suspend fun scan(hosts: List<String>): List<FoundAc> {
+        val wifi = currentWifi()
+        val replies = udpExchange(hosts, PORT, """{"t":"scan"}""", 3.seconds)
+        val ap = wifi?.takeIf { it == currentWifi() }?.let { (ssid, bssid) -> hotspot(ssid, bssid) }
+        return replies.mapNotNull { (host, reply) ->
             val dev = unpack(reply, GENERIC_KEY) ?: return@mapNotNull null
             val mac = dev.str("mac") ?: return@mapNotNull null
-            FoundAc(id, mac, host, dev.str("name") ?: mac)
+            discovered(host, mac, dev.str("name") ?: mac, ap)
         }
+    }
+
+    internal fun discovered(host: String, mac: String, name: String, connectedHotspot: FoundAc?): FoundAc =
+        connectedHotspot?.takeIf { it.host == host && it.mac.equals(mac, ignoreCase = true) }
+            ?: FoundAc(id, mac, host, name)
+
+    /** A reset module (MODE + WiFi on the remote) runs its own Wi-Fi and sits at [AP_HOST] on it. */
+    const val AP_HOST = "192.168.1.1"
+
+    override suspend fun joinWifi(found: FoundAc, ssid: String, password: String) {
+        if (!found.needsWifi || found.ssid == null || found.bssid == null) throw AcUnreachable()
+        // The module may leave its hotspot before its reply goes out.
+        val message = buildJsonObject { put("psw", password); put("ssid", ssid); put("t", "wlan") }.toString()
+        val reply = exchangeOnWifi(found, AP_PASSWORD, PORT, message)
+        if (reply != null && !wifiAccepted(reply)) throw AcUnreachable()
+    }
+
+    /** A module's own Wi-Fi is named after the end of its MAC (BSSID f4:91:1e:d4:54:bb: "1ed454bb"); its password is fixed. */
+    private const val AP_PASSWORD = "12345678"
+
+    override fun hotspot(ssid: String, bssid: String): FoundAc? {
+        val mac = bssid.replace(":", "").lowercase()
+        if (ssid.length != 8 || mac.length != 12 || !mac.endsWith(ssid.lowercase())) return null
+        return FoundAc(id, mac, AP_HOST, ssid, ssid, needsWifi = true, bssid = bssid.lowercase())
+    }
+
+    /** The module answers {"t":"ret","r":200,…}; a reply without "r" counts as accepted. */
+    internal fun wifiAccepted(reply: String) = runCatching {
+        Json.parseToJsonElement(reply).jsonObject["r"]?.jsonPrimitive?.intOrNull?.let { it == 200 } ?: true
+    }.getOrDefault(false)
 
     override suspend fun bind(found: FoundAc): LinkedAc {
         val r = request(found.host, found.mac, GENERIC_KEY, buildJsonObject { put("mac", found.mac); put("t", "bind"); put("uid", 0) })

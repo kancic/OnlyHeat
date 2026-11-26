@@ -2,14 +2,20 @@ package ancic.karim.onlyheat.ac
 
 import ancic.karim.onlyheat.data.Room
 import ancic.karim.onlyheat.data.attempt
+import ancic.karim.onlyheat.data.currentLanConnection
 import ancic.karim.onlyheat.data.fingerprint
 import ancic.karim.onlyheat.data.isPrivateIpv4
 import ancic.karim.onlyheat.data.lanHosts
+import ancic.karim.onlyheat.data.localIpv4s
 import ancic.karim.onlyheat.data.log
 import ancic.karim.onlyheat.data.nowSeconds
 import ancic.karim.onlyheat.data.savedAuthKey
 import ancic.karim.onlyheat.data.warmSetting
 import ancic.karim.onlyheat.ui.Heat
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import com.russhwolf.settings.Settings
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -57,8 +63,45 @@ internal fun AcState.changeTo(wanted: AcState) = AcChange(
 /** A room's AC as the screens see it: [state] null = it didn't answer (away from home); [loaded] false = still asking. */
 data class AcView(val state: AcState?, val loaded: Boolean)
 
-/** An AC that answered a scan, not yet paired. [protocol] is its [AcProtocol.id]. */
-data class FoundAc(val protocol: String, val mac: String, val host: String, val name: String)
+/** An unpaired AC. [ssid] and [bssid] identify its setup hotspot when [needsWifi] is true. */
+data class FoundAc(
+    val protocol: String, val mac: String, val host: String, val name: String, val ssid: String? = null,
+    val needsWifi: Boolean = false, val bssid: String? = null,
+)
+
+/** The Wi-Fi this device is on, as SSID to BSSID; null when not on Wi-Fi or the platform won't say. */
+internal expect fun currentWifi(): Pair<String, String>?
+
+/** A Wi-Fi network in range; [mhz] tells its band (an AC joins only 2.4 GHz, below 2500); [dbm]: signal, higher is
+ *  nearer; [seenAt]: when the scan last saw it, in epoch seconds. */
+internal data class NearbyWifi(val ssid: String, val bssid: String, val mhz: Int, val dbm: Int, val seenAt: Long)
+
+/** Nearby Wi-Fi networks, seen without joining them; empty where the platform can't scan. */
+internal expect fun nearbyWifi(): List<NearbyWifi>
+
+/** Spotting a reset AC by its own Wi-Fi needs the platform's permission (Android: location, since Wi-Fi scan results
+ *  need it). [ask] shows the permission dialog, or the app's system settings once the dialog no longer shows.
+ *  [on] is the Settings switch (on by default, though the permission is asked only from the notice); one instance
+ *  for the app, so the notice, the switch and the scans see a change at once. */
+class AcWifiAccess(private val settings: Settings, private val check: () -> Boolean, private val ask: suspend () -> Unit) {
+    var granted by mutableStateOf(check())
+        private set
+    var on by mutableStateOf(settings.getBoolean(AC_WIFI_SETUP, true))
+        private set
+    /** Wi-Fi scans for reset ACs run only while this holds. */
+    val active get() = on && granted
+    fun recheck() { granted = check() }
+    suspend fun request() { ask(); recheck() }
+    fun switch(on: Boolean) { this.on = on; settings.putBoolean(AC_WIFI_SETUP, on) }
+}
+
+private const val AC_WIFI_SETUP = "ac.wifiSetup"
+
+/** Null where the app can't scan Wi-Fi (iOS, desktop). */
+internal val LocalAcWifi = staticCompositionLocalOf<AcWifiAccess?> { null }
+
+/** Sends only over [ap]'s verified Wi-Fi, joining it if needed. Null means the datagram was sent but got no reply. */
+internal expect suspend fun exchangeOnWifi(ap: FoundAc, password: String, port: Int, message: String): String?
 
 /** An AC paired with a room. [secret] is whatever its protocol needs to talk to it (Gree: the unit's own key). */
 internal data class LinkedAc(val protocol: String, val mac: String, val host: String, val secret: String, val id: String = Uuid.random().toString()) {
@@ -77,12 +120,19 @@ internal interface AcProtocol {
     suspend fun bind(found: FoundAc): LinkedAc
     suspend fun status(ac: LinkedAc): AcState
     suspend fun apply(ac: LinkedAc, change: AcChange, isCurrent: () -> Boolean)
+    /** A reset unit of this brand, seen by its own Wi-Fi in a Wi-Fi scan; null if that Wi-Fi isn't one. */
+    fun hotspot(ssid: String, bssid: String): FoundAc? = null
+    /** Gives a unit that [FoundAc.needsWifi] the home Wi-Fi, joining its own Wi-Fi first when found by [hotspot]. */
+    suspend fun joinWifi(found: FoundAc, ssid: String, password: String): Unit = throw AcUnreachable()
 }
 
 internal val acProtocols: List<AcProtocol> = listOf(Gree)
 
 private fun protocolOf(id: String) = acProtocols.firstOrNull { it.id == id } ?: throw AcUnreachable()
 internal suspend fun FoundAc.bind() = protocolOf(protocol).bind(this)
+internal suspend fun FoundAc.joinWifi(ssid: String, password: String) = protocolOf(protocol).joinWifi(this, ssid, password)
+/** The reset AC whose own Wi-Fi this is, of any brand; null for any other Wi-Fi. */
+internal fun hotspotOf(ssid: String, bssid: String) = acProtocols.firstNotNullOfOrNull { it.hotspot(ssid, bssid) }
 internal suspend fun LinkedAc.status() = protocolOf(protocol).status(this)
 internal suspend fun LinkedAc.apply(change: AcChange, isCurrent: () -> Boolean): AcState? =
     protocolOf(protocol).applyConfirmed(this, change, isCurrent)
@@ -105,10 +155,14 @@ internal suspend fun AcProtocol.applyConfirmed(ac: LinkedAc, change: AcChange, i
 private val scanLock = Mutex()
 private var lastScan = 0L
 private var lastFound = emptyList<FoundAc>()
+private var lastNetwork: Any? = null
 
-/** Every AC on this device's Wi-Fi, all brands at once. */
+/** Every AC on this device's Wi-Fi, all brands at once. Another Wi-Fi (an AC's own after a reset) scans afresh:
+ *  told by the network's id where the platform gives one (an AC's Wi-Fi may share the home's subnet), else its addresses. */
 internal suspend fun scanAcs(force: Boolean = false): List<FoundAc> = scanLock.withLock {
-    if (!force && nowSeconds() - lastScan < 5 * 60) return@withLock lastFound
+    val network = Triple(currentLanConnection()?.id, attempt { localIpv4s() }.getOrNull(), currentWifi())
+    if (!force && network == lastNetwork && nowSeconds() - lastScan < 5 * 60) return@withLock lastFound
+    lastNetwork = network
     val hosts = lanHosts()
     lastFound = if (hosts.isEmpty()) emptyList() else coroutineScope {
         acProtocols.map { p -> async { attempt { p.scan(hosts) }.onFailure { log("${p.id} scan failed", it) }.getOrElse { emptyList() } } }

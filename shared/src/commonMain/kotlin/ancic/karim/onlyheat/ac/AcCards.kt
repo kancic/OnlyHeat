@@ -17,18 +17,25 @@ import ancic.karim.onlyheat.ui.FlameIcon
 import ancic.karim.onlyheat.ui.Heat
 import ancic.karim.onlyheat.ui.LocalCardShape
 import ancic.karim.onlyheat.ui.Section
+import ancic.karim.onlyheat.ui.SignalIcons
 import ancic.karim.onlyheat.ui.SunIcon
 import ancic.karim.onlyheat.ui.TempStepper
 import ancic.karim.onlyheat.ui.ThermostatIcon
+import ancic.karim.onlyheat.ui.VisibilityIcon
+import ancic.karim.onlyheat.ui.VisibilityOffIcon
 import ancic.karim.onlyheat.ui.WarningIcon
 import ancic.karim.onlyheat.ui.onCardTonal
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.TextObfuscationMode
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,6 +44,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
@@ -85,33 +94,47 @@ internal fun AcDiscoveryCard(
 internal fun AcFoundCard(
     rooms: List<Room>, busy: Boolean, minimized: Boolean, modifier: Modifier,
     onRoom: (Room) -> Unit, onMinimize: (Boolean) -> Unit,
+    /** Non-null while the AC is on its own Wi-Fi: asks for the home Wi-Fi (from [networks]) instead of a room. */
+    onJoinWifi: ((ssid: String, password: String) -> Unit)? = null, networks: List<NearbyWifi> = emptyList(),
 ) {
     val scheme = MaterialTheme.colorScheme
+    var askWifi by remember { mutableStateOf(false) }
+    if (askWifi && onJoinWifi != null) WifiDialog(networks, { askWifi = false }) { ssid, password -> askWifi = false; onJoinWifi(ssid, password) }
     Card(
         modifier.fillMaxWidth().animateContentSize(MaterialTheme.motionScheme.defaultSpatialSpec()),
         shape = LocalCardShape.current,
         colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainerHigh),
     ) {
-        Column(if (minimized) Modifier.padding(horizontal = 16.dp, vertical = 10.dp) else Modifier.padding(start = 16.dp, top = 12.dp, end = 4.dp, bottom = 8.dp)) {
+        // On its own Wi-Fi: one row like the minimized card; the home Wi-Fi is asked in a dialog.
+        val wifi = onJoinWifi != null
+        val oneRow = minimized || wifi
+        Column(if (oneRow) Modifier.padding(horizontal = 16.dp, vertical = 10.dp) else Modifier.padding(start = 16.dp, top = 12.dp, end = 4.dp, bottom = 8.dp)) {
             Row(Modifier.heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) { // QuickCard's stepper height
                 Badge(AcIcon, MaterialShapes.Cookie9Sided)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        stringResource(if (minimized) Res.string.ac_title else Res.string.ac_found_title),
+                        stringResource(if (oneRow) Res.string.ac_title else Res.string.ac_found_title),
                         style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    if (!minimized) Text(stringResource(Res.string.ac_found_question), style = MaterialTheme.typography.bodyMedium)
+                    if (wifi) Text(stringResource(Res.string.ac_wifi_question), style = MaterialTheme.typography.bodyMedium)
+                    else if (!minimized) Text(stringResource(Res.string.ac_found_question), style = MaterialTheme.typography.bodyMedium)
                 }
-                if (minimized) FilledTonalButton({ onMinimize(false) }, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) {
+                if (wifi) {
+                    if (busy) LoadingIndicator(Modifier.size(40.dp))
+                    else FilledTonalButton({ askWifi = true }, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) {
+                        Text(stringResource(Res.string.ac_wifi_connect))
+                    }
+                }
+                else if (minimized) FilledTonalButton({ onMinimize(false) }, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) {
                     Text(stringResource(Res.string.ac_choose_room))
                 }
                 else IconButton({ onMinimize(true) }, enabled = !busy, shapes = IconButtonDefaults.shapes()) {
                     Icon(ExpandLessIcon, stringResource(Res.string.ac_minimize))
                 }
             }
-            if (!minimized) {
+            if (!oneRow) {
                 Spacer(Modifier.height(4.dp))
                 if (busy) LoadingIndicator(Modifier.padding(start = 4.dp).size(40.dp))
                 else FlowRow(
@@ -130,6 +153,78 @@ internal fun AcFoundCard(
             }
         }
     }
+}
+
+/** The home Wi-Fi for an AC on its own Wi-Fi: picked from the nearby 2.4 GHz networks (or typed, for a hidden one).
+ *  It starts as the phone's current Wi-Fi if that's one of them, or wherever the platform can't scan. */
+@Composable
+private fun WifiDialog(networks: List<NearbyWifi>, onDismiss: () -> Unit, onJoin: (ssid: String, password: String) -> Unit) {
+    var ssid by rememberSaveable {
+        val current = currentWifi()?.takeIf { (s, b) -> hotspotOf(s, b) == null }?.first
+        mutableStateOf(current?.takeIf { networks.isEmpty() || networks.any { n -> n.ssid == it } }.orEmpty())
+    }
+    var picking by remember { mutableStateOf(false) }
+    var typing by rememberSaveable { mutableStateOf(networks.isEmpty()) } // a hidden network, or nothing listed
+    val password = remember { TextFieldState() }
+    var showPassword by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(AcIcon, contentDescription = null) },
+        title = { Text(stringResource(Res.string.ac_wifi_dialog_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ExposedDropdownMenuBox(picking, { picking = it && !typing }) {
+                    // A picker while there are networks to pick (no keyboard); a text field after Other network.
+                    OutlinedTextField(
+                        ssid, { ssid = it },
+                        Modifier.menuAnchor(
+                            if (typing) ExposedDropdownMenuAnchorType.PrimaryEditable else ExposedDropdownMenuAnchorType.PrimaryNotEditable,
+                        ).fillMaxWidth(),
+                        readOnly = !typing, singleLine = true,
+                        label = { Text(stringResource(Res.string.ac_wifi_name)) },
+                        supportingText = { Text(stringResource(Res.string.ac_wifi_band)) },
+                        trailingIcon = if (typing) null else {
+                            { ExposedDropdownMenuDefaults.TrailingIcon(picking) }
+                        },
+                    )
+                    ExposedDropdownMenu(picking, { picking = false }) {
+                        networks.forEach { n ->
+                            // Bars like Android's Wi-Fi list: -55 dBm and up is full.
+                            val bars = when { n.dbm >= -55 -> 4; n.dbm >= -66 -> 3; n.dbm >= -77 -> 2; else -> 1 }
+                            DropdownMenuItem(
+                                { Text(n.ssid) }, { ssid = n.ssid; picking = false },
+                                trailingIcon = { Icon(SignalIcons[bars - 1], stringResource(Res.string.ac_wifi_signal, bars)) },
+                            )
+                        }
+                        DropdownMenuItem({ Text(stringResource(Res.string.ac_wifi_other)) }, { ssid = ""; typing = true; picking = false })
+                    }
+                }
+                OutlinedSecureTextField( // like the PIN field
+                    password, Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(Res.string.ac_wifi_password)) },
+                    textObfuscationMode = if (showPassword) TextObfuscationMode.Visible else TextObfuscationMode.RevealLastTyped,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                    trailingIcon = {
+                        IconButton({ showPassword = !showPassword }, shapes = IconButtonDefaults.shapes()) {
+                            Icon(
+                                if (showPassword) VisibilityOffIcon else VisibilityIcon,
+                                stringResource(if (showPassword) Res.string.ac_wifi_hide_password else Res.string.ac_wifi_show_password),
+                            )
+                        }
+                    },
+                )
+            }
+        },
+        confirmButton = {
+            // A listed name goes out as listed (SSIDs may end in spaces); a typed one loses stray spaces.
+            TextButton({ onJoin(if (typing) ssid.trim() else ssid, password.text.toString()) }, enabled = ssid.isNotBlank(), shapes = ButtonDefaults.shapes()) {
+                Text(stringResource(Res.string.ac_wifi_connect))
+            }
+        },
+        dismissButton = {
+            TextButton(onDismiss, shapes = ButtonDefaults.shapes()) { Text(stringResource(Res.string.cancel)) }
+        },
+    )
 }
 
 /** All ACs in one phrase for the Rooms header ("AC heating"); null without any, or while none answers. */

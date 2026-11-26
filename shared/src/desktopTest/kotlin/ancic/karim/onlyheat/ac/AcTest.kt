@@ -59,6 +59,30 @@ class AcTest {
     }
 
     @Test
+    fun wifiSetupNeedsTheModulesOwnWifiAndAnOkReply() {
+        // A module's own Wi-Fi is named after the end of its MAC.
+        val hotspot = Gree.hotspot("1ed454bb", "F4:91:1E:D4:54:BB")
+        assertEquals(FoundAc("gree", "f4911ed454bb", Gree.AP_HOST, "1ed454bb", "1ed454bb",
+            needsWifi = true, bssid = "f4:91:1e:d4:54:bb"), hotspot)
+        assertEquals(hotspot, hotspotOf("1ed454bb", "F4:91:1E:D4:54:BB"))
+        assertNull(Gree.hotspot("r1m", "84:3c:99:e9:9d:eb"))
+        assertNull(Gree.hotspot("12345678", "84:3c:99:e9:9d:eb"))
+        assertTrue(Gree.wifiAccepted("""{"t":"ret","r":200,"msg":"Success."}"""))
+        assertTrue(Gree.wifiAccepted("""{"t":"ret"}"""))
+        assertFalse(Gree.wifiAccepted("""{"t":"ret","r":400}"""))
+        assertFalse(Gree.wifiAccepted("garbage"))
+    }
+
+    @Test
+    fun setupAddressAloneDoesNotIdentifyAResetUnit() {
+        val hotspot = Gree.hotspot("1ed454bb", "f4:91:1e:d4:54:bb")
+        assertFalse(Gree.discovered(Gree.AP_HOST, "f4911ed454bb", "AC", null).needsWifi)
+        assertFalse(Gree.discovered(Gree.AP_HOST, "f4921ed454bb", "AC", hotspot).needsWifi)
+        assertFalse(Gree.discovered("192.168.1.50", "f4911ed454bb", "AC", hotspot).needsWifi)
+        assertEquals(hotspot, Gree.discovered(Gree.AP_HOST, "F4911ED454BB", "AC", hotspot))
+    }
+
+    @Test
     fun notificationPairingDoesNotSurviveReplacementOrLogout() = runTest {
         withSettings { s ->
             s.putString("ac.room.legacy", "gree|${ac.mac}|${ac.host}|${ac.secret}")

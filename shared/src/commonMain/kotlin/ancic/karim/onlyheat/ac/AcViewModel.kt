@@ -4,6 +4,7 @@ import ancic.karim.onlyheat.data.Room
 import ancic.karim.onlyheat.data.attempt
 import ancic.karim.onlyheat.data.decodeSet
 import ancic.karim.onlyheat.data.log
+import ancic.karim.onlyheat.data.nowSeconds
 import ancic.karim.onlyheat.data.savedAuthKey
 import ancic.karim.onlyheat.res.*
 import androidx.compose.material3.*
@@ -35,7 +36,11 @@ internal class AcViewModel(private val settings: Settings, private val key: Stri
         private set
     var lanScanSucceeded by mutableStateOf(false)
         private set
+    /** The nearby Wi-Fi an AC can join (2.4 GHz, not an AC's own), strongest first; from the last [refresh]'s scan. */
+    var homeWifi by mutableStateOf(emptyList<NearbyWifi>())
+        private set
     private var discoveryEnabled = false
+    private var scanWifi = false // from the last [refresh]
     /** The found card shrunk to one row. It can't be hidden: an unpaired AC stays on offer. */
     var minimized by mutableStateOf(settings.getBoolean(AC_MINIMIZED, false))
         private set
@@ -48,6 +53,8 @@ internal class AcViewModel(private val settings: Settings, private val key: Stri
     private val queued = mutableMapOf<String, AcChange>()
     private val revisions = mutableMapOf<String, Long>()
     private val awayRooms = mutableStateSetOf<String>()
+    private val wifiSent = mutableMapOf<String, Long>() // MAC -> when it was given the home Wi-Fi (epoch seconds)
+    private var rescan = false // after a Wi-Fi send: the cached LAN scan may still hold the AC at its own Wi-Fi's address
     /** Away or I'm back is switching this room's AC, so [set] ignores changes until it's done. */
     fun busy(roomId: String) = roomId in awayRooms
 
@@ -56,10 +63,20 @@ internal class AcViewModel(private val settings: Settings, private val key: Stri
     }
 
     private suspend fun updateFound(force: Boolean = false) {
-        val nearby = scanAcs(force)
+        val fresh = force || rescan
+        val nearby = scanAcs(fresh)
+        if (fresh) rescan = false
         if (nearby.isNotEmpty()) lanScanSucceeded = true
         val taken = linked.values.map { it.protocol to it.mac }.toSet()
-        found = nearby.filter { (it.protocol to it.mac) !in taken }
+        val wifi = if (scanWifi) attempt { nearbyWifi() }.getOrDefault(emptyList()) else emptyList()
+        val hotspots = wifi.mapNotNull { w ->
+            // One sent the home Wi-Fi stays off the list until a scan sees its own Wi-Fi again after that.
+            hotspotOf(w.ssid, w.bssid)?.takeIf { w.seenAt > (wifiSent[it.mac] ?: 0L) }
+        }
+        homeWifi = wifi.filter { it.mhz < 2500 && it.ssid.isNotBlank() && hotspotOf(it.ssid, it.bssid) == null }
+            .sortedByDescending { it.dbm }.distinctBy { it.ssid } // strongest first: the home router, then neighbours
+        // A paired AC that was reset needs its Wi-Fi again too. Already on its Wi-Fi: the scan's own entry comes first.
+        found = (nearby + hotspots).distinctBy { it.protocol to it.mac }.filter { it.needsWifi || (it.protocol to it.mac) !in taken }
     }
 
     fun discover(requestAccess: suspend () -> Boolean) {
@@ -78,8 +95,10 @@ internal class AcViewModel(private val settings: Settings, private val key: Stri
         }
     }
 
-    /** [canScan] is null where access can't be checked. There, resume automatic scans after a user starts discovery. */
-    suspend fun refresh(canScan: Boolean?, read: suspend (LinkedAc) -> AcState = { it.status() }) {
+    /** [canScan] is null where access can't be checked. There, resume automatic scans after a user starts discovery.
+     *  [scanWifi]: also look for reset ACs by their own Wi-Fi ([AcWifiAccess.active]). */
+    suspend fun refresh(canScan: Boolean?, scanWifi: Boolean = false, read: suspend (LinkedAc) -> AcState = { it.status() }) {
+        this.scanWifi = scanWifi
         coroutineScope {
             if ((canScan ?: discoveryEnabled) && !binding && !discovering) launch { updateFound() }
             linked.forEach { (id, ac) ->
@@ -117,6 +136,23 @@ internal class AcViewModel(private val settings: Settings, private val key: Stri
         } finally {
             binding = false
         }
+    }
+
+    /** Gives a reset AC (on its own Wi-Fi) the home Wi-Fi. It shows up as found again once the phone is back home. */
+    fun joinWifi(ac: FoundAc, ssid: String, password: String) = viewModelScope.launch {
+        if (binding) return@launch
+        binding = true
+        val sent = try {
+            attempt { ac.joinWifi(ssid, password) }.onFailure { log("AC Wi-Fi setup failed", it) }.isSuccess
+        } finally {
+            binding = false
+        }
+        if (sent) {
+            wifiSent[ac.mac] = nowSeconds()
+            rescan = true
+            found -= ac
+        }
+        snackbar?.showSnackbar(getString(if (sent) Res.string.ac_wifi_sent else Res.string.ac_failed))
     }
 
     fun minimize(on: Boolean) {

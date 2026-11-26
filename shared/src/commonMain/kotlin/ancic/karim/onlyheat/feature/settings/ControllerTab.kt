@@ -33,6 +33,9 @@ import ancic.karim.onlyheat.ui.PersonIcon
 import ancic.karim.onlyheat.ui.PinField
 import ancic.karim.onlyheat.ui.RefreshIcon
 import ancic.karim.onlyheat.ui.ScheduleIcon
+import ancic.karim.onlyheat.ac.AcWifiAccess
+import ancic.karim.onlyheat.ac.LocalAcWifi
+import ancic.karim.onlyheat.ui.AcIcon
 import ancic.karim.onlyheat.ui.Section
 import ancic.karim.onlyheat.ui.SectionHeading
 import ancic.karim.onlyheat.ui.TabInsets
@@ -83,6 +86,7 @@ fun ControllerTab(
     onLogout: () -> Unit, openSchedule: () -> Unit,
 ) {
     val settings = koinInject<Settings>()
+    val acWifi = LocalAcWifi.current
     var pin by remember { mutableStateOf(savedPin(settings)) }
     var pinPrompt by remember { mutableStateOf<PinPrompt?>(null) }
     var confirmRestart by remember { mutableStateOf(false) }
@@ -233,6 +237,8 @@ fun ControllerTab(
             Group {
             if (backgroundAlerts != null) item("alerts") { AlertsCard(Modifier.springIn(5), settings, backgroundAlerts) }
 
+            acWifi?.let { access -> item("acWifi") { AcWifiCard(Modifier.springIn(6), access) } }
+
             item("limits") { LimitsCard(Modifier.springIn(6), settings, alerts = backgroundAlerts != null) }
 
             item("tips") {
@@ -304,6 +310,21 @@ private fun AlertsCard(modifier: Modifier, settings: Settings, enable: (Boolean)
     Section(stringResource(Res.string.alerts_title), stringResource(Res.string.alerts_desc), BellIcon, MaterialShapes.Clover8Leaf,
         modifier = modifier) {
         Switch(on, { on = it; settings.putBoolean("alerts.on", it); enable(it) })
+    }
+}
+
+/** Spotting reset ACs by their own Wi-Fi. Shows the user's choice, not whether scans run, so it can be turned off
+ *  without the permission. Turning it on asks for it (or opens the app's system settings once Android no longer asks);
+ *  turning it off stops the Wi-Fi scans and the Rooms notice. */
+@Composable
+private fun AcWifiCard(modifier: Modifier, access: AcWifiAccess) {
+    val scope = rememberCoroutineScope()
+    Section(stringResource(Res.string.ac_wifi_setting_title), stringResource(Res.string.ac_wifi_setting_desc), AcIcon,
+        MaterialShapes.Cookie9Sided, accent = 1, modifier = modifier) {
+        Switch(access.on, { on ->
+            access.switch(on)
+            if (on && !access.granted) scope.launch { access.request() }
+        })
     }
 }
 

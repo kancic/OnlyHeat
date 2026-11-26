@@ -5,6 +5,7 @@ import ancic.karim.onlyheat.ac.AcDiscoveryCard
 import ancic.karim.onlyheat.ac.AcFoundCard
 import ancic.karim.onlyheat.ac.AcMode
 import ancic.karim.onlyheat.ac.AcViewModel
+import ancic.karim.onlyheat.ac.LocalAcWifi
 import ancic.karim.onlyheat.ac.AcState
 import ancic.karim.onlyheat.ac.acCoolCap
 import ancic.karim.onlyheat.ac.acIsWrong
@@ -35,11 +36,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import com.russhwolf.settings.Settings
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
 // The Rooms tab's notification area, between the Away card and the rooms: everything that needs attention
@@ -168,6 +170,8 @@ internal fun roomNotices(
     val outside = model.outside
     val watched = model.watched // the background check's view; null when alerts are off or it's stale
     val list = mutableListOf<Notice>()
+    val acWifi = LocalAcWifi.current
+    val scope = rememberCoroutineScope()
     model.error?.let { e ->
         list += Notice("error", Level.Error, e, icon = CloudOffIcon,
             actions = listOf(NoticeAction(stringResource(Res.string.retry)) { model.refresh() }))
@@ -233,12 +237,20 @@ internal fun roomNotices(
     if (h != null && h.rooms.isNotEmpty()) {
         val found = acs.found.firstOrNull()
         // Found can be minimized but not closed: closing would lose the AC until it drops off the network.
-        if (found != null) list += Notice("ac-found", Level.Suggestion, custom = { m, _ ->
-            AcFoundCard(h.rooms, acs.binding, acs.minimized, m, { acs.assign(found, it) }, acs::minimize)
+        if (found != null) list += Notice("ac-found:${found.protocol}:${found.mac}:${found.bssid}", Level.Suggestion, custom = { m, _ ->
+            AcFoundCard(
+                h.rooms, acs.binding, acs.minimized, m, { acs.assign(found, it) }, acs::minimize,
+                if (found.needsWifi) { ssid, password -> acs.joinWifi(found, ssid, password) } else null, acs.homeWifi,
+            )
         })
         else if (discoverAc != null) list += Notice("ac-discovery", Level.Info, custom = { m, close ->
             AcDiscoveryCard(acs.discovering, enabled = !acs.discovering && !acs.binding, m, close, discoverAc)
         })
+        // Beside the cards above, not instead of them: LAN discovery works without the permission. Shown whatever else is
+        // shown, so a close sticks until the permission or the Settings switch ends it.
+        if (acWifi != null && !acWifi.granted && acWifi.on) list += Notice("ac-wifi-access", Level.Suggestion,
+            stringResource(Res.string.ac_wifi_access_desc), stringResource(Res.string.ac_wifi_access_title), AcIcon,
+            listOf(NoticeAction(stringResource(Res.string.ac_wifi_access_allow)) { scope.launch { acWifi.request() } }))
     }
     // Include pending AC tips so a weather outage alone never resets a dismissal.
     if (h != null) {

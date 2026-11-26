@@ -11,6 +11,7 @@ import platform.posix.INET_ADDRSTRLEN
 import platform.posix.sockaddr_in
 
 internal actual suspend fun currentLanConnection(): LanConnection? = null
+internal actual val requiresLanConnection = false
 
 @OptIn(ExperimentalForeignApi::class)
 internal actual fun localIpv4s(): List<Pair<String, Int>> = memScoped {
