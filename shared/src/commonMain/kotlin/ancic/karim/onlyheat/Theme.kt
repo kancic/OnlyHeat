@@ -1,11 +1,12 @@
 package ancic.karim.onlyheat
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import ancic.karim.onlyheat.res.Res
 import ancic.karim.onlyheat.res.schedule_locked
 import org.jetbrains.compose.resources.stringResource
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -229,11 +230,12 @@ internal fun TempStepper(
 /** Temperature that rolls up or down like an odometer when it changes; null shows a dash. */
 @Composable
 internal fun RollingTemp(value: Double?, style: TextStyle, modifier: Modifier = Modifier, color: Color = Color.Unspecified) {
+    val roll = MaterialTheme.motionScheme.fastSpatialSpec<IntOffset>()
     AnimatedContent(
         value, modifier,
         transitionSpec = {
             val up = (targetState ?: 0.0) > (initialState ?: 0.0)
-            slideInVertically { if (up) it else -it } togetherWith slideOutVertically { if (up) -it else it }
+            slideInVertically(roll) { if (up) it else -it } togetherWith slideOutVertically(roll) { if (up) -it else it }
         },
     ) { v ->
         Text(v?.let { "${fmt1(it)}°" } ?: "—", style = style, color = color, textAlign = TextAlign.Center)
@@ -257,6 +259,8 @@ internal fun Modifier.collapsing(bar: TopAppBarScrollBehavior): Modifier {
     val s = bar.state
     val scope = rememberCoroutineScope()
     val g = remember { Glide() }
+    // No bounce: a bouncy spring's long tail keeps the glide running, and glide() drops same-way events meanwhile.
+    val spec = spring<Float>(stiffness = Spring.StiffnessMediumLow)
     fun glide(open: Boolean) {
         // A trackpad sends a stream of events: let a glide already heading this way run, don't restart it.
         if (g.job?.isActive == true && g.open == open) return
@@ -264,7 +268,7 @@ internal fun Modifier.collapsing(bar: TopAppBarScrollBehavior): Modifier {
         g.open = open
         g.job = scope.launch {
             val end = if (open) 0f else s.heightOffsetLimit
-            animate(s.heightOffset, end, animationSpec = tween(200, easing = FastOutSlowInEasing)) { v, _ -> s.heightOffset = v }
+            animate(s.heightOffset, end, animationSpec = spec) { v, _ -> s.heightOffset = v }
         }
     }
     return nestedScroll(bar.nestedScrollConnection).pointerInput(bar) {

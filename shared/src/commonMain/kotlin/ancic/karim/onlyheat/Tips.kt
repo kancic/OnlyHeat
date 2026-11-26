@@ -23,6 +23,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.russhwolf.settings.Settings
 import kotlinx.coroutines.delay
@@ -63,9 +65,12 @@ private fun FirstTimeTip(vararg all: TipPage) {
     BasicAlertDialog(::done) { // Back closes it; a tap outside does too, like any dialog
         Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
             Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                val motion = MaterialTheme.motionScheme
+                val slide = motion.defaultSpatialSpec<IntOffset>()
                 AnimatedContent(current, modifier = Modifier.weight(1f, fill = false), transitionSpec = {
                     val dir = if (targetState > initialState) 1 else -1
-                    (slideInHorizontally { it * dir / 3 } + fadeIn()) togetherWith (slideOutHorizontally { -it * dir / 3 } + fadeOut())
+                    (slideInHorizontally(slide) { it * dir / 3 } + fadeIn(motion.defaultEffectsSpec())) togetherWith
+                        (slideOutHorizontally(slide) { -it * dir / 3 } + fadeOut(motion.fastEffectsSpec()))
                 }) { p ->
                     Column(Modifier.verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
                         pages[p].scene()
@@ -78,8 +83,9 @@ private fun FirstTimeTip(vararg all: TipPage) {
                 Spacer(Modifier.height(20.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (pages.size > 1) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        val dot = MaterialTheme.motionScheme.fastSpatialSpec<Dp>()
                         pages.indices.forEach { i ->
-                            val w by animateDpAsState(if (i == current) 20.dp else 8.dp)
+                            val w by animateDpAsState(if (i == current) 20.dp else 8.dp, dot)
                             Box(Modifier.size(w, 8.dp).clip(CircleShape).background(
                                 if (i == current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant))
                         }
@@ -101,8 +107,9 @@ internal fun resetTips(s: Settings) = s.keys.filter { it.startsWith(TIP) }.forEa
 /** The picture area of a page: a card-coloured box with the app's own effects drawn by [effects]. */
 @Composable
 private fun Scene(container: Color, ink: Color, effects: Modifier = Modifier, content: @Composable () -> Unit) {
-    val bg by animateColorAsState(container)
-    val fg by animateColorAsState(ink)
+    val fade = MaterialTheme.motionScheme.defaultEffectsSpec<Color>()
+    val bg by animateColorAsState(container, fade)
+    val fg by animateColorAsState(ink, fade)
     Box(
         Modifier.fillMaxWidth().height(160.dp).clip(MaterialTheme.shapes.extraLarge).background(bg).then(effects),
         contentAlignment = Alignment.Center,
@@ -209,10 +216,11 @@ private fun AwayScene() {
     Scene(MaterialTheme.colorScheme.surfaceContainerLow, MaterialTheme.colorScheme.onSurface) {
         Column(Modifier.padding(horizontal = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val dusk = MaterialTheme.motionScheme.slowEffectsSpec<Color>() // night falls slowly
                 own.forEachIndexed { i, t ->
                     val night = asleep[i]
-                    val bg by animateColorAsState(if (night) NightSky else warm())
-                    val ink by animateColorAsState(if (night) NightInk else warmInk())
+                    val bg by animateColorAsState(if (night) NightSky else warm(), dusk)
+                    val ink by animateColorAsState(if (night) NightInk else warmInk(), dusk)
                     Box(
                         Modifier.weight(1f).height(72.dp).clip(MaterialTheme.shapes.large).background(bg)
                             .flames(!night, seed = i).night(night, NightInk, seed = i, moon = NoMoon, zTo = NoMoon),

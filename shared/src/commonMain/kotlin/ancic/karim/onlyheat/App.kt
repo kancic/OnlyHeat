@@ -34,10 +34,15 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.lifecycle.ViewModel
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
@@ -215,7 +220,6 @@ internal class HomeModel(
     val outside get() = home?.outdoorTemp ?: weather?.temp
     private val weatherLock = Mutex()
     private var weatherAt: TimeMark? = null
-    val days = mutableStateOf<List<DaySummary>?>(null) // History tab, kept across navigation
     private val pending = mutableMapOf<String, Job>() // debounced writes per room id
     private var allRevision = 0
     private val session = noticeSession(settings)
@@ -539,6 +543,20 @@ internal class HomeModel(
     }
 }
 
+/**
+ * M3 fade-through: the old content fades out quickly, then the new one fades and scales in. Tweens, not the
+ * MotionScheme's springs: the fade-in and scale must wait for the fade-out, which a spring can't.
+ */
+internal fun fadeThrough() =
+    (fadeIn(tween(210, delayMillis = 90)) + scaleIn(tween(210, delayMillis = 90), initialScale = 0.92f)) togetherWith
+        fadeOut(tween(90))
+
+/** Holds the logged-in session's ViewModels; see [Main]. */
+private class SessionStore : ViewModel(), ViewModelStoreOwner {
+    override val viewModelStore = ViewModelStore()
+    override fun onCleared() = viewModelStore.clear()
+}
+
 @Composable
 private fun Main(
     api: HeatApi,
@@ -554,14 +572,20 @@ private fun Main(
     onLogout: () -> Unit,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val session = noticeSession(koinInject<Settings>())
-    val model = koinViewModel<HomeModel>(key = "home:$session:$key") { parametersOf(key) }
+    val settings = koinInject<Settings>()
+    val session = noticeSession(settings)
+    // This session's ViewModels live in their own store, cleared on logout (Main leaves while no key is saved),
+    // so old sessions' models don't pile up in the activity's store; a recreation keeps them.
+    val store = viewModel { SessionStore() }
+    DisposableEffect(store) { onDispose { if (savedAuthKey(settings) != key) store.viewModelStore.clear() } }
+    val model = koinViewModel<HomeModel>(viewModelStoreOwner = store, key = "home:$session:$key") { parametersOf(key) }
     model.visible = { lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
     model.notify = notify
     model.wakeAt = wakeAt
     model.openNotificationSettings = openNotificationSettings
     LifecycleResumeEffect(model) { model.notificationsAllowed = notificationsAllowed(); onPauseOrDispose {} }
-    val acs = koinViewModel<AcModel>(key = "ac:$session:$key") { parametersOf(key) }
+    val acs = koinViewModel<AcModel>(viewModelStoreOwner = store, key = "ac:$session:$key") { parametersOf(key) }
+    val historyModel = koinViewModel<HistoryModel>(viewModelStoreOwner = store, key = "history:$session:$key") { parametersOf(key) }
     val logout = { acs.endSession(); onLogout() }
     model.onLoggedOut = logout
     acs.snackbar = model.snackbar
@@ -629,6 +653,7 @@ private fun Main(
                                 { tab = it },
                                 model,
                                 acs,
+                                historyModel,
                                 api,
                                 key,
                                 host,
@@ -713,6 +738,7 @@ private fun MainTabs(
     onTab: (Tab) -> Unit,
     model: HomeModel,
     acs: AcModel,
+    history: HistoryModel,
     api: HeatApi,
     key: String,
     host: String,
@@ -725,39 +751,32 @@ private fun MainTabs(
     scheduleTipOpen: Boolean, // holds the welcome tour back, so two dialogs never stack
     open: (Screen) -> Unit,
 ) {
+    // Each tab keeps its saved state (scroll, app bar, cards already sprung in) while another is shown;
+    // without it every switch rebuilt the tab and replayed the cards' spring-in under the fade-through.
+    val tabStates = rememberSaveableStateHolder()
     val tabContent = @Composable {
-        // M3 fade-through: old tab fades out quickly, new one fades and scales in.
-        AnimatedContent(tab, transitionSpec = {
-            (fadeIn(tween(210, delayMillis = 90)) + scaleIn(
-                tween(210, delayMillis = 90),
-                initialScale = 0.92f
-            )) togetherWith
-                    fadeOut(tween(90))
-        }) { displayedTab ->
-            when (displayedTab) {
-                Tab.Rooms -> {
-                    if (tab == Tab.Rooms && !scheduleTipOpen) RoomsTip(hasAc = acs.linked.isNotEmpty())
-                    RoomsTab(model, acs, discoverAc, onScheduleLocked) { open(Screen.RoomDetail(it)) }
-                }
-                Tab.History -> OverviewScreen(
-                    api,
-                    key,
-                    model.home?.rooms,
-                    model.days
-                ) { open(Screen.RoomDetail(it)) }
+        AnimatedContent(tab, transitionSpec = { fadeThrough() }) { displayedTab ->
+            tabStates.SaveableStateProvider(displayedTab.name) {
+                when (displayedTab) {
+                    Tab.Rooms -> {
+                        if (tab == Tab.Rooms && !scheduleTipOpen) RoomsTip(hasAc = acs.linked.isNotEmpty())
+                        RoomsTab(model, acs, discoverAc, onScheduleLocked) { open(Screen.RoomDetail(it)) }
+                    }
+                    Tab.History -> OverviewScreen(history, model.home?.rooms) { open(Screen.RoomDetail(it)) }
 
-                Tab.Controller -> {
-                    ControllerTab(
-                        model.home?.device,
-                        host,
-                        requestLocalNetwork,
-                        hasLocalNetwork,
-                        cloudStatus = { attempt { api.home(key) }.exceptionOrNull() },
-                        snackbar = model.snackbar,
-                        backgroundAlerts = backgroundAlerts,
-                        onRestarted = model::refreshRooms,
-                        onLogout = onLogout,
-                    ) { open(Screen.ScheduleEditor) }
+                    Tab.Controller -> {
+                        ControllerTab(
+                            model.home?.device,
+                            host,
+                            requestLocalNetwork,
+                            hasLocalNetwork,
+                            cloudStatus = { attempt { api.home(key) }.exceptionOrNull() },
+                            snackbar = model.snackbar,
+                            backgroundAlerts = backgroundAlerts,
+                            onRestarted = model::refreshRooms,
+                            onLogout = onLogout,
+                        ) { open(Screen.ScheduleEditor) }
+                    }
                 }
             }
         }

@@ -15,6 +15,7 @@ val appModule = module {
     single { historyDbBuilder().setDriver(BundledSQLiteDriver()).build().readings() }
     viewModel { (key: String) -> HomeModel(get(), get(), key, get()) }
     viewModel { (key: String) -> AcModel(get(), key) }
+    viewModel { (key: String) -> HistoryModel(get(), get(), get(), key) }
 }
 
 /** Starts Koin once per process; later calls (iOS recreating its view controller) do nothing. */

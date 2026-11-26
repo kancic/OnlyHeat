@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -54,6 +55,7 @@ import kotlin.math.floor
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 import org.koin.compose.koinInject
+import androidx.lifecycle.ViewModel
 
 @Composable
 private fun SubScreen(
@@ -311,38 +313,59 @@ private enum class Period(val seconds: Long, val bucket: Long, val label: String
     Month(30 * 24 * 3600L, 2 * 3600L, Res.string.range_month), // 2-h averages: ~360 points
 }
 
-/** All rooms over the last day (from /getSmartRoomLogsLast24h), week or month (stored on this device). */
-@Composable
-fun OverviewScreen(
-    api: HeatApi, key: String,
-    rooms: List<Room>?, // from the home poll, so week/month work even when the day call fails
-    cache: MutableState<List<DaySummary>?>, // hoisted so coming back from a room doesn't reload from scratch
-    onRoom: (String) -> Unit,
-) {
-    val settings = koinInject<Settings>()
-    val history = koinInject<ReadingDao>()
-    var days by cache
-    var error by remember { mutableStateOf<String?>(null) }
-    var attempt by remember { mutableIntStateOf(0) }
-    var period by rememberSaveable { mutableStateOf(Period.Day) }
-    var stored by remember { mutableStateOf<Map<String, List<Point>>?>(null) } // per room, for week/month
-    var storedOutside by remember { mutableStateOf<List<Point>>(emptyList()) }
-    var since by remember { mutableStateOf<Long?>(null) }
-    LaunchedEffect(attempt) {
+/** Week/month readings stored on this device: per room, outside, and the oldest saved day. */
+internal class Stored(val seconds: Long, val rooms: Map<String, List<Point>>, val outside: List<Point>, val since: Long?)
+
+/** The History tab's data. Outlives tab switches and room screens like [HomeModel], so coming back shows what
+ *  was there while it refreshes, instead of loading from scratch. */
+internal class HistoryModel(
+    private val api: HeatApi, private val history: ReadingDao, private val settings: Settings, private val key: String,
+) : ViewModel() {
+    var days by mutableStateOf<List<DaySummary>?>(null) // the last 24 h, from the server
+        private set
+    var error by mutableStateOf<String?>(null)
+        private set
+    var stored by mutableStateOf<Stored?>(null) // week/month, set in one go so it's never half set
+        private set
+
+    suspend fun loadDay() {
         error = null
         attempt { days = api.last24h(key) }.onFailure { error = errorText(it) }
     }
-    val ids = rooms?.map { it.id } // stable across polls, unlike the list itself
-    LaunchedEffect(period, ids, key) {
-        if (ids == null || period == Period.Day) return@LaunchedEffect
+
+    /** What this device has for [seconds] back, right away, then again once topped up from the server. */
+    suspend fun loadStored(ids: List<String>, seconds: Long, bucket: Long) {
         suspend fun read() {
-            val from = nowSeconds() - period.seconds
-            stored = ids.associateWith { id -> history.averaged(id, from, period.bucket).map { it.point() } }
-            storedOutside = history.averaged(outsideId(key, settings), from, period.bucket).map { it.point() }
-            since = history.oldest()
+            val from = nowSeconds() - seconds
+            stored = Stored(
+                seconds,
+                ids.associateWith { id -> history.averaged(id, from, bucket).map { it.point() } },
+                history.averaged(outsideId(key, settings), from, bucket).map { it.point() },
+                history.oldest(),
+            )
         }
-        read() // what we have, right away
-        attempt { syncHistory(api, history, key, settings, every = 30.minutes) }.onSuccess { read() } // then top up from the server
+        read()
+        attempt { syncHistory(api, history, key, settings, every = 30.minutes) }.onSuccess { read() }
+    }
+}
+
+/** All rooms over the last day (from /getSmartRoomLogsLast24h), week or month (stored on this device). */
+@Composable
+internal fun OverviewScreen(
+    model: HistoryModel,
+    rooms: List<Room>?, // from the home poll, so week/month work even when the day call fails
+    onRoom: (String) -> Unit,
+) {
+    val days = model.days
+    val error = model.error
+    var attempt by remember { mutableIntStateOf(0) }
+    var period by rememberSaveable { mutableStateOf(Period.Day) }
+    // Another period's readings (kept since the last visit) count as not loaded yet, never as this one's.
+    val stored = model.stored?.takeIf { it.seconds == period.seconds }
+    LaunchedEffect(attempt) { model.loadDay() } // refreshes on every visit; the last day shows meanwhile
+    val ids = rooms?.map { it.id } // stable across polls, unlike the list itself
+    LaunchedEffect(period, ids) {
+        if (ids != null && period != Period.Day) model.loadStored(ids, period.seconds, period.bucket)
     }
 
     SubScreen(stringResource(Res.string.history), onBack = null) { pad ->
@@ -350,15 +373,16 @@ fun OverviewScreen(
         val dayFailed = period == Period.Day && days == null && error != null
         val rows = rooms.map { r ->
             r to if (period == Period.Day) days?.find { it.roomId == r.id }?.points.orEmpty().takeIf { days != null }
-            else stored?.get(r.id)
+            else stored?.rooms?.get(r.id)
         }
         val forecasts = if (period == Period.Day) days.orEmpty().associate { it.roomId to it.forecast } else emptyMap()
-        val outside = if (period == Period.Day) days.orEmpty().flatMap { it.points }.outside() else storedOutside
+        val outside = if (period == Period.Day) days.orEmpty().flatMap { it.points }.outside() else stored?.outside.orEmpty()
         val outsideAhead = if (period == Period.Day) days.orEmpty().flatMap { it.forecast }.outside() else emptyList()
         val hasOutside = outside.isNotEmpty() || outsideAhead.isNotEmpty()
         // One scale so rooms compare at a glance.
         val shared = yRangeOf(rows.flatMap { it.second.orEmpty() } + forecasts.values.flatten())
         // Under 2 days saved, the week/month view would only repeat the 24 h tab: say so instead.
+        val since = stored?.since
         val nothingSaved = period != Period.Day && stored != null && nowSeconds() - (since ?: nowSeconds()) < 2 * 24 * 3600L
         BoxWithConstraints(Modifier.padding(pad).fillMaxSize()) { LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 420.dp),
@@ -381,6 +405,10 @@ fun OverviewScreen(
                         predicted = outsideAhead.isNotEmpty() || forecasts.values.any { it.isNotEmpty() },
                         outside = hasOutside,
                     )
+                    // The refresh failed but the last day is still shown: say it may be out of date.
+                    if (period == Period.Day && days != null) error?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
                     if (period != Period.Day && !nothingSaved) since?.let {
                         Text(
                             stringResource(Res.string.stored_since, dayMonth(it)),
@@ -389,7 +417,7 @@ fun OverviewScreen(
                     }
                 }
             }
-            if (dayFailed) item(span = span) { Message(error!!, Modifier.fillMaxWidth().padding(top = 48.dp)) { attempt++ } }
+            if (dayFailed) item(span = span) { Message(error, Modifier.fillMaxWidth().padding(top = 48.dp)) { attempt++ } }
             else if (nothingSaved) item(span = span) {
                 Message(stringResource(Res.string.no_history), Modifier.fillMaxWidth().padding(top = 48.dp), ChartIcon, onRetry = null)
             }
@@ -401,31 +429,46 @@ fun OverviewScreen(
                 ) {
                     Column(Modifier.padding(20.dp)) {
                         Text(room.name, style = MaterialTheme.typography.titleMediumEmphasized)
-                        if (points == null) Box(Modifier.fillMaxWidth().height(180.dp), Alignment.Center) { LoadingIndicator() }
-                        else if (points.size < 2 && !hasOutside) Box(Modifier.fillMaxWidth().height(180.dp), Alignment.Center) {
-                            Text( // one room without data while others have some
-                                stringResource(if (period == Period.Day) Res.string.no_data else Res.string.no_history),
-                                Modifier.widthIn(max = 280.dp), style = MaterialTheme.typography.bodyMedium,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                color = LocalContentColor.current.copy(alpha = 0.7f),
-                            )
-                        }
-                        else {
-                            if (points.size >= 2) StatsLine(points, MaterialTheme.typography.bodyMedium)
-                            val temps = points.mapNotNull { it.current }
-                            if (temps.isNotEmpty()) Text(
-                                "${fmt1(temps.min())}–${fmt1(temps.max())}°", style = MaterialTheme.typography.bodySmall,
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            TempChart(
-                                points, Modifier.fillMaxWidth().height(if (hasOutside) 180.dp else 140.dp), shared, forecast = forecasts[room.id].orEmpty(),
-                                outside = outside, outsideAhead = outsideAhead,
-                            )
-                        }
+                        // The chart's data rides in the state, so the outgoing period fades out with its own readings.
+                        val chart = CardChart(period, points, forecasts[room.id].orEmpty(), outside, outsideAhead, shared)
+                        AnimatedContent(
+                            chart, contentKey = { it.period to (it.points == null) }, transitionSpec = { fadeThrough() },
+                        ) { c -> CardChartBody(c) }
                     }
                 }
             }
         } }
+    }
+}
+
+private class CardChart(
+    val period: Period, val points: List<Point>?, val forecast: List<Point>,
+    val outside: List<Point>, val outsideAhead: List<Point>, val range: ClosedFloatingPointRange<Double>?,
+) { val hasOutside get() = outside.isNotEmpty() || outsideAhead.isNotEmpty() }
+
+@Composable
+private fun CardChartBody(c: CardChart) {
+    val points = c.points
+    if (points == null) Box(Modifier.fillMaxWidth().height(180.dp), Alignment.Center) { LoadingIndicator() }
+    else if (points.size < 2 && !c.hasOutside) Box(Modifier.fillMaxWidth().height(180.dp), Alignment.Center) {
+        Text( // one room without data while others have some
+            stringResource(if (c.period == Period.Day) Res.string.no_data else Res.string.no_history),
+            Modifier.widthIn(max = 280.dp), style = MaterialTheme.typography.bodyMedium,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            color = LocalContentColor.current.copy(alpha = 0.7f),
+        )
+    }
+    else Column {
+        if (points.size >= 2) StatsLine(points, MaterialTheme.typography.bodyMedium)
+        val temps = points.mapNotNull { it.current }
+        if (temps.isNotEmpty()) Text(
+            "${fmt1(temps.min())}–${fmt1(temps.max())}°", style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(Modifier.height(8.dp))
+        TempChart(
+            points, Modifier.fillMaxWidth().height(if (c.hasOutside) 180.dp else 140.dp), c.range, forecast = c.forecast,
+            outside = c.outside, outsideAhead = c.outsideAhead,
+        )
     }
 }
 
