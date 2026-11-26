@@ -264,15 +264,19 @@
     <string name="ac_header_cooling">klima hladi</string>
     <string name="ac_header_on">klima radi</string>
     <string name="floor_heating">Pod grije</string>
-    <string name="notice_window">%1$s: temperatura brzo pada iako bi se trebalo grijati. Je li otvoren prozor?</string>
     <string name="notices_title">Obavijesti</string>
     <string name="notice_notifications_off">Upozorenja su uključena, ali su obavijesti za OnlyHeat isključene pa ih nećete vidjeti.</string>
     <string name="notice_notifications_allow">Uključi</string>
-    <string name="notice_open_room">Otvori prostoriju</string>
-    <string name="ac_turn_on">Uključi klimu</string>
+    <string name="notice_expand">Prikaži</string>
+    <string name="room_issue_window">Otvoren prozor?</string>
+    <string name="room_issue_not_warming">Ne zagrijava se</string>
+    <string name="room_issue_too_hot">Pretoplo, a i dalje grije</string>
+    <string name="room_issue_use_ac">Vani %1$s°: uključi klimu</string>
+    <string name="notices_more">Još %1$d</string>
+    <string name="notices_less">Prikaži manje</string>
     <string name="close">Zatvori</string>
     <string name="ac_mode">Način rada</string>
     <string name="update_available">Dostupan je OnlyHeat %1$s.</string>
     <string name="update_install">Instaliraj</string>
-    <string name="update_downloading">Preuzimanje OnlyHeata %1$s… %2$d%%</string>
+    <string name="update_downloading">Preuzimanje OnlyHeata %1$s… %2$d %</string>
 </resources>

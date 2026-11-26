@@ -3,6 +3,7 @@ package ancic.karim.onlyheat.feature.rooms
 import ancic.karim.onlyheat.ac.AcFan
 import ancic.karim.onlyheat.ac.AcMode
 import ancic.karim.onlyheat.ac.AcState
+import ancic.karim.onlyheat.ac.fighting
 import ancic.karim.onlyheat.data.AC_ABOVE
 import ancic.karim.onlyheat.data.OperationNotice
 import ancic.karim.onlyheat.data.Pairing
@@ -17,6 +18,7 @@ import ancic.karim.onlyheat.data.savePairing
 import ancic.karim.onlyheat.data.saveWriteNotice
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 
@@ -120,8 +122,8 @@ class NoticesTest {
 
     @Test fun fightNeedsALinkedAcCooling() {
         val heated = listOf(room("a", 22.0, 23.0, heating = true))
-        assertEquals(listOf("fight-a"), keys(heated, acs = mapOf("a" to cooling)))
-        assertEquals(emptyList(), keys(heated))
+        assertTrue(fighting(heated[0], cooling))
+        assertFalse(fighting(heated[0], null))
     }
 
     @Test fun shownNoticesClearHalfADegreeLater() {
@@ -135,6 +137,8 @@ class NoticesTest {
     }
 
     @Test fun fightingRoomIsNotAlsoBlamedOnTheValve() {
-        assertEquals(listOf("fight-a"), keys(listOf(room("a", 25.0, 23.0, heating = true)), acs = mapOf("a" to cooling)))
+        val hot = listOf(room("a", 25.0, 23.0, heating = true))
+        assertEquals(listOf("hot-a"), keys(hot))
+        assertEquals(emptyList(), keys(hot, acs = mapOf("a" to cooling)))
     }
 }

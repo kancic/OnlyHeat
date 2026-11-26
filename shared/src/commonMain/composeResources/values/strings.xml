@@ -263,15 +263,19 @@
     <string name="ac_header_cooling">AC cooling</string>
     <string name="ac_header_on">AC on</string>
     <string name="floor_heating">Floor heating</string>
-    <string name="notice_window">%1$s is cooling down fast while it should heat. Is a window open?</string>
     <string name="notices_title">Notifications</string>
-    <string name="notice_notifications_off">Alerts are on, but notifications are off for OnlyHeat, so you won\'t see them.</string>
+    <string name="notice_notifications_off">Alerts are on, but notifications are off for OnlyHeat, so you won’t see them.</string>
     <string name="notice_notifications_allow">Turn on</string>
-    <string name="notice_open_room">Open room</string>
-    <string name="ac_turn_on">Turn on AC</string>
+    <string name="notice_expand">Show</string>
+    <string name="room_issue_window">Window open?</string>
+    <string name="room_issue_not_warming">Not warming up</string>
+    <string name="room_issue_too_hot">Too warm, still heating</string>
+    <string name="room_issue_use_ac">%1$s° outside: try the AC</string>
+    <string name="notices_more">%1$d more</string>
+    <string name="notices_less">Show less</string>
     <string name="close">Close</string>
     <string name="ac_mode">Mode</string>
     <string name="update_available">OnlyHeat %1$s is available.</string>
     <string name="update_install">Install</string>
-    <string name="update_downloading">Downloading OnlyHeat %1$s… %2$d%%</string>
+    <string name="update_downloading">Downloading OnlyHeat %1$s… %2$d %</string>
 </resources>

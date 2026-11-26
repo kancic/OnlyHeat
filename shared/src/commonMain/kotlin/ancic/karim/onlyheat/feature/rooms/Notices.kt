@@ -3,7 +3,6 @@ package ancic.karim.onlyheat.feature.rooms
 import ancic.karim.onlyheat.ac.AcChange
 import ancic.karim.onlyheat.ac.AcDiscoveryCard
 import ancic.karim.onlyheat.ac.AcFoundCard
-import ancic.karim.onlyheat.ac.AcMode
 import ancic.karim.onlyheat.ac.AcViewModel
 import ancic.karim.onlyheat.ac.LocalAcWifi
 import ancic.karim.onlyheat.ac.AcState
@@ -19,28 +18,54 @@ import ancic.karim.onlyheat.data.isAcCandidate
 import ancic.karim.onlyheat.data.isTooHot
 import ancic.karim.onlyheat.res.*
 import ancic.karim.onlyheat.ui.AMBER
+import ancic.karim.onlyheat.ui.LuggageIcon
+import ancic.karim.onlyheat.ui.HomeIcon
+import ancic.karim.onlyheat.ui.BellIcon
 import ancic.karim.onlyheat.ui.AcIcon
 import ancic.karim.onlyheat.ui.AirIcon
-import ancic.karim.onlyheat.ui.CloseIcon
 import ancic.karim.onlyheat.ui.CloudOffIcon
+import ancic.karim.onlyheat.ui.Badge
 import ancic.karim.onlyheat.ui.DownloadIcon
+import ancic.karim.onlyheat.ui.ExpandLessIcon
+import ancic.karim.onlyheat.ui.LocalCardShape
 import ancic.karim.onlyheat.ui.FlameIcon
 import ancic.karim.onlyheat.ui.Section
 import ancic.karim.onlyheat.ui.ThermostatIcon
 import ancic.karim.onlyheat.ui.TuneIcon
 import ancic.karim.onlyheat.ui.WarningIcon
-import ancic.karim.onlyheat.ui.hueContainer
 import ancic.karim.onlyheat.ui.hueContent
 import ancic.karim.onlyheat.ui.onCardTonal
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import kotlin.math.abs
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
@@ -48,7 +73,7 @@ import org.jetbrains.compose.resources.stringResource
 // The Rooms tab's notification area, between the Away card and the rooms: everything that needs attention
 // right now, most severe first. Built from the current state on every composition; only closed keys are stored.
 
-/** Order = sort order. Only [Suggestion] and [Info] can be closed: errors and warnings clear when fixed. */
+/** Order = sort order. Any notice can be closed: one that reflects a live problem stays hidden until it clears. */
 internal enum class Level { Error, Warning, Suggestion, Info }
 
 internal class NoticeAction(val label: String, val enabled: Boolean = true, val onClick: () -> Unit)
@@ -62,64 +87,121 @@ internal class Notice(
     val icon: ImageVector? = null,
     val actions: List<NoticeAction> = emptyList(),
     val custom: (@Composable (Modifier, onClose: (() -> Unit)?) -> Unit)? = null,
-    val closable: Boolean = level >= Level.Suggestion,
+    val closable: Boolean = true,
     val progress: Float? = null, // shown as a bar in place of the actions
 )
 
-/** A Settings card ([Section]): errors and warnings tinted with a badge in their own ink, suggestions and info
- *  neutral with a colorful badge (suggestions primary, info tertiary, so neighbours differ). */
+/** The Rooms tab's notice card: errors tinted red; warnings neutral with an amber badge, so the red ones stand out;
+ *  suggestions and info neutral with a colorful badge (suggestions primary, info tertiary, so neighbours differ).
+ *  A swipe closes it when [onClose] is set. */
 @Composable
 internal fun NoticeCard(n: Notice, modifier: Modifier = Modifier, onClose: (() -> Unit)? = null) {
     n.custom?.let { return it(modifier, onClose) }
-    val scheme = MaterialTheme.colorScheme
-    val (container, ink) = when (n.level) {
-        Level.Error -> scheme.errorContainer to scheme.onErrorContainer
-        Level.Warning -> hueContainer(AMBER) to hueContent(AMBER)
-        else -> scheme.surfaceContainerHigh to scheme.onSurface
+    if (onClose == null) CompactNotice(n, modifier)
+    else SwipeToClose(onClose, modifier) { CompactNotice(n, it) }
+}
+
+/** Nothing behind it: the content fades as it slides away. Past the point where letting go closes it, a tick and a
+ *  springy shrink; back under it, it springs back to full size. Screen readers get Close as an action instead. */
+@Composable
+private fun SwipeToClose(onClose: () -> Unit, modifier: Modifier, content: @Composable (Modifier) -> Unit) {
+    val closeLabel = stringResource(Res.string.close)
+    val state = rememberSwipeToDismissBoxState()
+    val haptics = LocalHapticFeedback.current
+    val armed = state.targetValue != SwipeToDismissBoxValue.Settled
+    var wasArmed by remember { mutableStateOf(false) }
+    LaunchedEffect(armed) {
+        if (armed != wasArmed) haptics.performHapticFeedback(if (armed) HapticFeedbackType.GestureThresholdActivate else HapticFeedbackType.SegmentTick)
+        wasArmed = armed
     }
-    Section(
-        n.title, n.text, n.icon, MaterialShapes.Cookie9Sided, accent = if (n.level == Level.Info) 1 else 0,
-        modifier = modifier, container = container, ink = ink,
-        below = if (n.progress != null) ({
-            LinearWavyProgressIndicator({ n.progress }, Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp))
-        }) else if (n.actions.isEmpty()) null else ({
-            Row(Modifier.align(Alignment.End).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                n.actions.forEach { a ->
-                    FilledTonalButton(a.onClick, enabled = a.enabled, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) { Text(a.label) }
-                }
-            }
-        }),
-    ) {
-        if (onClose != null) IconButton(onClose, modifier = Modifier.align(Alignment.Top).offset(y = (-8).dp), shapes = IconButtonDefaults.shapes()) {
-            Icon(CloseIcon, stringResource(Res.string.close))
+    val scale by animateFloatAsState(if (armed) 0.95f else 1f, MaterialTheme.motionScheme.fastSpatialSpec())
+    // Once it's off screen its height springs away, so the cards below slide up; only then is it closed.
+    // Not clipped, or the card would be cut at the screen's padding while it slides.
+    val shown = remember { MutableTransitionState(true) }
+    if (!shown.targetState && shown.isIdle) LaunchedEffect(Unit) { onClose() }
+    AnimatedVisibility(shown, exit = shrinkVertically(MaterialTheme.motionScheme.defaultSpatialSpec(), clip = false)) {
+        SwipeToDismissBox(
+            state, backgroundContent = {},
+            modifier = modifier.semantics { customActions = listOf(CustomAccessibilityAction(closeLabel) { onClose(); true }) },
+            onDismiss = { haptics.performHapticFeedback(HapticFeedbackType.Confirm); shown.targetState = false },
+        ) {
+            content(Modifier.graphicsLayer {
+                val moved = runCatching { state.requireOffset() }.getOrDefault(0f)
+                alpha = 1f - (abs(moved) / size.width).coerceIn(0f, 1f)
+                scaleX = scale; scaleY = scale
+            })
         }
     }
 }
 
-/** Heating and AC working against each other (callers check [fighting]); the weather picks which one the button
- *  turns off. A scheduled room's heating can't be switched by hand, so it also gets Turn off AC. */
+/** One card that grows in place. Collapsed it shows two lines at most, so every notice is the same height, with a
+ *  lone button in the row; expanded, the rest of the text and the buttons below. A download in progress stays open
+ *  for its bar. */
 @Composable
-internal fun fightNotice(
-    room: Room, outside: Double?, onChange: (AcChange) -> Unit,
-    title: String? = null, // the room's name in the rooms list, where "this room" alone doesn't say which
-    busy: Boolean = false, // Away or I'm back is switching the AC, which ignores changes meanwhile
-    onHeatingOff: () -> Unit,
-): Notice {
-    val off = acIsWrong(room, outside)
-    return Notice(
-        "fight-${room.id}", Level.Error,
-        stringResource(if (off) Res.string.ac_fighting_cold else Res.string.ac_fighting), title, WarningIcon,
-        listOfNotNull(
-            if (!off) NoticeAction(stringResource(Res.string.ac_heating_off), onClick = onHeatingOff) else null,
-            if (off || room.schedule) NoticeAction(stringResource(Res.string.ac_turn_off), !busy) { onChange(AcChange(power = false)) } else null,
-        ),
-    )
+private fun CompactNotice(n: Notice, modifier: Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    val error = n.level == Level.Error
+    val container = if (error) scheme.errorContainer else scheme.surfaceContainerHigh
+    val ink = if (error) scheme.onErrorContainer else scheme.onSurface
+    val badgeInk = when (n.level) { Level.Error -> ink; Level.Warning -> hueContent(AMBER); else -> null }
+    var expanded by rememberSaveable(n.key) { mutableStateOf(false) }
+    var cut by remember { mutableStateOf(false) }
+    val open = expanded || n.progress != null
+    val inline = if (open) null else n.actions.singleOrNull()
+    val toggles = n.progress == null && (expanded || cut || n.actions.size > 1)
+    val fit: (TextLayoutResult) -> Unit = { if (it.hasVisualOverflow) cut = true }
+    Card(
+        modifier.fillMaxWidth().animateContentSize(MaterialTheme.motionScheme.defaultSpatialSpec()),
+        shape = LocalCardShape.current, colors = CardDefaults.cardColors(container, ink),
+    ) {
+        Column(
+            Modifier.then(if (toggles) Modifier.clickable { expanded = !expanded } else Modifier)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+        ) {
+            Row(Modifier.heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (n.icon != null) {
+                    Badge(n.icon, MaterialShapes.Cookie9Sided, if (n.level == Level.Info) 1 else 0, badgeInk)
+                    Spacer(Modifier.width(12.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    if (n.title != null) Text(n.title, style = MaterialTheme.typography.titleMediumEmphasized,
+                        maxLines = if (open) Int.MAX_VALUE else 1, overflow = TextOverflow.Ellipsis, onTextLayout = fit)
+                    if (n.text.isNotEmpty()) Text(n.text, style = MaterialTheme.typography.bodyMedium,
+                        color = LocalContentColor.current.copy(alpha = if (n.title != null) 0.8f else 1f),
+                        maxLines = if (open) Int.MAX_VALUE else if (n.title != null) 1 else 2,
+                        overflow = TextOverflow.Ellipsis, onTextLayout = fit)
+                }
+                if (inline != null) NoticeButtons(listOf(inline), Modifier.padding(start = 8.dp))
+                else if (toggles) ExpandChevron(
+                    expanded, stringResource(if (expanded) Res.string.ac_minimize else Res.string.notice_expand),
+                    Modifier.padding(start = 8.dp),
+                )
+            }
+            if (n.progress != null) LinearWavyProgressIndicator({ n.progress }, Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp))
+            else if (open && n.actions.isNotEmpty()) NoticeButtons(n.actions, Modifier.align(Alignment.End).padding(top = 4.dp))
+        }
+    }
+}
+
+/** Points down while collapsed, turns up when [expanded]. */
+@Composable
+internal fun ExpandChevron(expanded: Boolean, description: String?, modifier: Modifier = Modifier) {
+    val turn by animateFloatAsState(if (expanded) 0f else 180f, MaterialTheme.motionScheme.defaultSpatialSpec())
+    Icon(ExpandLessIcon, description, modifier.rotate(turn))
+}
+
+@Composable
+private fun NoticeButtons(actions: List<NoticeAction>, modifier: Modifier) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        actions.forEach { a ->
+            FilledTonalButton(a.onClick, enabled = a.enabled, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) { Text(a.label) }
+        }
+    }
 }
 
 /** What a room needs attention for; [key] identifies its notice (and what was closed). */
 internal sealed class RoomIssue(val room: Room, kind: String) {
     val key = "$kind-${room.id}"
-    class Fight(room: Room) : RoomIssue(room, "fight")
     class Window(room: Room) : RoomIssue(room, "window")
     class NotWarming(room: Room, val temp: Double, val target: Double) : RoomIssue(room, "stuck")
     class TooHot(room: Room, val temp: Double, val target: Double) : RoomIssue(room, "hot")
@@ -140,7 +222,6 @@ internal fun roomIssues(
     for (r in rooms) {
         val ac = acState(r.id)
         val fight = fighting(r, ac)
-        if (fight) add(RoomIssue.Fight(r))
         val t = r.current ?: continue
         val target = r.target
         // Window and not warming need readings over time, so they come from the background check; the live
@@ -168,11 +249,9 @@ internal fun roomIssues(
 /** Everything for the Rooms tab's notification area, sorted, closed ones left out. */
 @Composable
 internal fun roomNotices(
-    model: HomeViewModel, acs: AcViewModel, discoverAc: (() -> Unit)?, onScheduleLocked: () -> Unit, openRoom: (String) -> Unit,
+    model: HomeViewModel, acs: AcViewModel, discoverAc: (() -> Unit)?,
 ): List<Notice> {
     val h = model.home
-    val outside = model.outside
-    val watched = model.watched // the background check's view; null when alerts are off or it's stale
     val list = mutableListOf<Notice>()
     val acWifi = LocalAcWifi.current
     val scope = rememberCoroutineScope()
@@ -181,58 +260,25 @@ internal fun roomNotices(
             actions = listOf(NoticeAction(stringResource(Res.string.retry)) { model.refresh() }))
     }
     if (model.alertsOn && !model.notificationsAllowed) list += Notice("notifications", Level.Warning,
-        stringResource(Res.string.notice_notifications_off), icon = WarningIcon,
+        stringResource(Res.string.notice_notifications_off), icon = BellIcon,
         actions = listOf(NoticeAction(stringResource(Res.string.notice_notifications_allow), onClick = model.openNotificationSettings)))
     model.writeNotices.forEach { (id, text) ->
-        list += Notice("write-$id", Level.Warning, text, icon = WarningIcon, closable = true)
+        // The room's name as the title, so the list scans by room.
+        val name = h?.rooms?.find { it.id == id }?.name
+        list += Notice("write-$id", Level.Warning, name?.let { text.removePrefix("$it: ") } ?: text, name, ThermostatIcon)
     }
     model.operationNotices.forEach { (operation, text) ->
-        val retry = when (operation) {
-            OperationNotice.AwayFailed -> NoticeAction(stringResource(Res.string.retry), !model.awayBusy) {
-                model.retryAway { acs.setAway(true) }
-            }
-            OperationNotice.BackFailed -> NoticeAction(stringResource(Res.string.retry), !model.awayBusy) {
-                model.comeBack { acs.setAway(false) }
-            }
-            else -> null
-        }
-        val title = when (operation) {
-            OperationNotice.AwayFailed -> stringResource(Res.string.away_failed)
-            OperationNotice.BackFailed -> stringResource(Res.string.back_failed)
-            OperationNotice.AllFailed -> stringResource(Res.string.all_failed)
-            else -> null
+        val (title, icon, retry) = when (operation) {
+            OperationNotice.AwayFailed -> Triple(stringResource(Res.string.away_failed), LuggageIcon,
+                NoticeAction(stringResource(Res.string.retry), !model.awayBusy) { model.retryAway { acs.setAway(true) } })
+            OperationNotice.BackFailed -> Triple(stringResource(Res.string.back_failed), LuggageIcon,
+                NoticeAction(stringResource(Res.string.retry), !model.awayBusy) { model.comeBack { acs.setAway(false) } })
+            OperationNotice.AllFailed -> Triple(stringResource(Res.string.all_failed), HomeIcon, null)
+            OperationNotice.AcOff, OperationNotice.AcOn -> Triple(null, AcIcon, null)
+            OperationNotice.AwayKept -> Triple(null, LuggageIcon, null)
         }
         list += Notice("operation-${operation.name}", if (retry == null) Level.Warning else Level.Error,
-            text, title, WarningIcon, listOfNotNull(retry), closable = retry == null)
-    }
-    val issues = roomIssues(h?.rooms.orEmpty(), watched, outside, model.warmAbove, model.shownIssues + model.closed) {
-        acs.room(it)?.state
-    }
-    val issueKeys = issues.map { it.key }.toSet()
-    LaunchedEffect(issueKeys) { model.shownIssues = issueKeys }
-    for (i in issues) {
-        val r = i.room
-        list += when (i) {
-            is RoomIssue.Fight -> fightNotice(r, outside, { acs.set(r.id, it) }, r.name, acs.busy(r.id)) {
-                model.heatingOff(r, onScheduleLocked)
-            }
-            is RoomIssue.Window -> Notice(i.key, Level.Warning, stringResource(Res.string.notice_window, r.name), icon = AirIcon)
-            is RoomIssue.NotWarming -> Notice(i.key, Level.Warning,
-                stringResource(Res.string.alert_not_warming, r.name, fmt1(i.temp), fmt1(i.target)), icon = ThermostatIcon,
-                actions = listOf(NoticeAction(stringResource(Res.string.notice_open_room)) { openRoom(r.id) }))
-            is RoomIssue.TooHot -> Notice(i.key, Level.Warning,
-                stringResource(Res.string.alert_too_hot, r.name, fmt1(i.temp), fmt1(i.target)), icon = FlameIcon)
-            is RoomIssue.UseAc -> {
-                val tipOutside = i.outside ?: continue
-                Notice(i.key, Level.Suggestion,
-                    stringResource(Res.string.alert_use_ac, r.name, fmt1(tipOutside)), icon = AcIcon,
-                    actions = i.coolingTarget?.let { target ->
-                        listOf(NoticeAction(stringResource(Res.string.ac_turn_on), !acs.busy(r.id)) {
-                            acs.set(r.id, AcChange(power = true, mode = AcMode.Cool, target = target))
-                        })
-                    }.orEmpty())
-            }
-        }
+            text, title, icon, listOfNotNull(retry))
     }
     model.update?.let { u ->
         // The version in the key: closing hides this release only, the next one shows again.
@@ -265,16 +311,62 @@ internal fun roomNotices(
             stringResource(Res.string.ac_wifi_access_desc), stringResource(Res.string.ac_wifi_access_title), AcIcon,
             listOf(NoticeAction(stringResource(Res.string.ac_wifi_access_allow)) { scope.launch { acWifi.request() } }))
     }
-    // Include pending AC tips so a weather outage alone never resets a dismissal.
     if (h != null) {
-        val keys = issueKeys + list.map { it.key }
+        val keys = list.map { it.key }.toSet()
         LaunchedEffect(keys) { model.forgetClosed(keys) }
     }
     return list.filter { it.key !in model.closed }.sortedBy { it.level }
 }
 
+/** Room problems by room id, shown on the room cards instead of the notification area. The fight shows in the
+ *  card's AC row already, with its buttons on the room's page, so it isn't listed again. */
+@Composable
+internal fun roomIssuesById(model: HomeViewModel, acs: AcViewModel): Map<String, List<RoomIssue>> {
+    val issues = roomIssues(model.home?.rooms.orEmpty(), model.watched, model.outside, model.warmAbove, model.shownIssues) {
+        acs.room(it)?.state
+    }
+    val keys = issues.map { it.key }.toSet()
+    LaunchedEffect(keys) { model.shownIssues = keys }
+    return issues.filter { !(it is RoomIssue.UseAc && it.outside == null) }.groupBy { it.room.id }
+}
+
+/** One problem as a short pill on its room card; the card opens the room for the rest. */
+@Composable
+internal fun RoomIssuePill(i: RoomIssue) {
+    val (icon, text) = when (i) {
+        is RoomIssue.Window -> AirIcon to stringResource(Res.string.room_issue_window)
+        is RoomIssue.NotWarming -> ThermostatIcon to stringResource(Res.string.room_issue_not_warming)
+        is RoomIssue.TooHot -> FlameIcon to stringResource(Res.string.room_issue_too_hot)
+        is RoomIssue.UseAc -> AcIcon to stringResource(Res.string.room_issue_use_ac, fmt1(i.outside ?: 0.0))
+    }
+    // In the card's own ink, so it suits every room color.
+    val fg = LocalContentColor.current
+    val bg = fg.copy(alpha = 0.16f)
+    Row(
+        Modifier.background(bg, CircleShape).padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(icon, null, Modifier.size(16.dp), tint = fg)
+        Text(text, style = MaterialTheme.typography.labelLarge, color = fg)
+    }
+}
+
+/** Heating and AC working against each other (callers check [fighting]); the weather picks which one the button
+ *  turns off. A scheduled room's heating can't be switched by hand, so it also gets Turn off AC. */
 @Composable
 internal fun AcFightCard(
     room: Room, outside: Double?, onChange: (AcChange) -> Unit, modifier: Modifier = Modifier,
-    busy: Boolean = false, onHeatingOff: () -> Unit,
-) = NoticeCard(fightNotice(room, outside, onChange, busy = busy, onHeatingOff = onHeatingOff), modifier)
+    busy: Boolean = false, // Away or I'm back is switching the AC, which ignores changes meanwhile
+    onHeatingOff: () -> Unit,
+) {
+    val off = acIsWrong(room, outside)
+    val actions = listOfNotNull(
+        if (!off) NoticeAction(stringResource(Res.string.ac_heating_off), onClick = onHeatingOff) else null,
+        if (off || room.schedule) NoticeAction(stringResource(Res.string.ac_turn_off), !busy) { onChange(AcChange(power = false)) } else null,
+    )
+    Section(
+        null, stringResource(if (off) Res.string.ac_fighting_cold else Res.string.ac_fighting), WarningIcon, MaterialShapes.Cookie9Sided,
+        modifier = modifier, container = MaterialTheme.colorScheme.errorContainer, ink = MaterialTheme.colorScheme.onErrorContainer,
+        below = { NoticeButtons(actions, Modifier.align(Alignment.End)) },
+    )
+}

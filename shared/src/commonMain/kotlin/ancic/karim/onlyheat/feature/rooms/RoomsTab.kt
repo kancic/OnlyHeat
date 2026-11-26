@@ -113,12 +113,16 @@ private fun roomsSubtitle(h: Home, acs: List<AcState?>): String {
     ).joinToString(" · ")
 }
 
+private const val NOTICES_SHOWN = 3 // past this, the rest wait behind an "N more" row
+
 @Composable
 internal fun RoomsTab(
     model: HomeViewModel, acs: AcViewModel, discoverAc: (() -> Unit)?, onScheduleLocked: () -> Unit, openRoom: (String) -> Unit,
 ) {
     var acSheet by rememberSaveable { mutableStateOf<String?>(null) } // room id
-    val notices = roomNotices(model, acs, discoverAc, onScheduleLocked, openRoom)
+    val notices = roomNotices(model, acs, discoverAc)
+    val issues = roomIssuesById(model, acs)
+    var allNotices by rememberSaveable { mutableStateOf(false) }
     val scroll = collapsingBar()
     val pull = rememberPullToRefreshState()
     Scaffold(
@@ -216,9 +220,26 @@ internal fun RoomsTab(
                         if (notices.isNotEmpty()) item(span = span, key = "notices") {
                             Column {
                                 SectionHeading(stringResource(Res.string.notices_title), modifier = Modifier.padding(vertical = 12.dp))
+                                // The most severe three; the rest behind a row that says how many.
+                                val folded = notices.size > NOTICES_SHOWN + 1 // never hide just one
+                                val shown = if (allNotices || !folded) notices else notices.take(NOTICES_SHOWN)
                                 Group {
-                                    notices.forEach { n ->
+                                    shown.forEach { n ->
                                         item(n.key) { NoticeCard(n, Modifier.springIn(2), if (n.closable) ({ model.close(n.key) }) else null) }
+                                    }
+                                    if (folded) item("more") {
+                                        PressCard(
+                                            { allNotices = !allNotices }, Modifier.fillMaxWidth(), shape = LocalCardShape.current,
+                                            colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                        ) {
+                                            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    if (allNotices) stringResource(Res.string.notices_less) else stringResource(Res.string.notices_more, notices.size - NOTICES_SHOWN),
+                                                    Modifier.weight(1f), style = MaterialTheme.typography.titleSmall,
+                                                )
+                                                ExpandChevron(allNotices, null)
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -246,6 +267,7 @@ internal fun RoomsTab(
                                 ac = acs.room(r.id),
                                 onAcChange = { acs.set(r.id, it) },
                                 onAcMore = { acSheet = r.id },
+                                issues = issues[r.id].orEmpty(),
                                 onOpen = { openRoom(r.id) }) { t -> model.setTarget(r, t) }
                         }
                         if (h != null && h.rooms.isEmpty()) item(span = span) { Text(stringResource(Res.string.no_rooms)) }
@@ -302,6 +324,7 @@ private fun RoomCard(
     ac: AcView? = null, // the room's AC: its row goes under the heating row, and it drives the animations too
     onAcChange: (AcChange) -> Unit = {},
     onAcMore: () -> Unit = {}, // tapping the AC's name: mode and fan
+    issues: List<RoomIssue> = emptyList(), // pills under the status line (Notices.kt)
     onOpen: () -> Unit,
     onTarget: (Double?) -> Unit
 ) {
@@ -363,6 +386,9 @@ private fun RoomCard(
                         status, style = MaterialTheme.typography.labelLarge,
                         color = LocalContentColor.current.copy(alpha = if (working) 1f else 0.75f),
                     )
+                    if (issues.isNotEmpty()) FlowRow(
+                        Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) { issues.forEach { RoomIssuePill(it) } }
                 }
                 // One layout for every room: the temperature beside the name, then a row per device.
                 RollingTemp(room.current, MaterialTheme.typography.displaySmall)

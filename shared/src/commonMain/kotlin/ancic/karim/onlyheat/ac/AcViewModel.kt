@@ -19,7 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.getString
 
-private const val AC_MINIMIZED = "ac.minimized"
+private const val AC_MINIMIZED = "ac.minimized2" // renamed so everyone starts minimized
 private const val AC_AWAY = "away.acPairings" // under "away.": logout clears it with the rest of Away
 
 /** AC state for the Rooms tab. Outlives tab switches like [HomeViewModel]. */
@@ -42,7 +42,7 @@ internal class AcViewModel(private val settings: Settings, private val key: Stri
     private var discoveryEnabled = false
     private var scanWifi = false // from the last [refresh]
     /** The found card shrunk to one row. It can't be hidden: an unpaired AC stays on offer. */
-    var minimized by mutableStateOf(settings.getBoolean(AC_MINIMIZED, false))
+    var minimized by mutableStateOf(settings.getBoolean(AC_MINIMIZED, true))
         private set
     var snackbar: SnackbarHostState? = null
     /** The room's AC; null without one. */
