@@ -1,5 +1,6 @@
 package ancic.karim.onlyheat.ac
 
+import ancic.karim.onlyheat.data.attempt
 import ancic.karim.onlyheat.data.log
 import ancic.karim.onlyheat.data.str
 import com.russhwolf.settings.Settings
@@ -10,9 +11,8 @@ import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.content.TextContent
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.number
 import kotlinx.datetime.toLocalDateTime
@@ -27,18 +27,17 @@ import kotlin.time.TimeSource
 
 internal expect fun md5(data: ByteArray): ByteArray
 
-/** A blocking byte stream to a cloud server; reads time out after a few seconds. Use on Dispatchers.IO. */
+/** A blocking byte stream, available only inside [withCloudSocket]. */
 internal interface CloudSocket {
     fun write(bytes: ByteArray)
     /** The next byte, or -1 at the end of the stream. */
     fun read(): Int
-    fun close()
 }
 
-/** TLS verifies the certificate and host name like HTTPS. Null where the platform has no sockets for it (iOS). */
-internal expect fun openCloudSocket(host: String, port: Int, tls: Boolean): CloudSocket?
+/** Runs blocking socket I/O off the caller thread and closes the connection on cancellation. */
+internal expect suspend fun <T> withCloudSocket(host: String, port: Int, tls: Boolean, exchange: (CloudSocket) -> T): T?
 
-/** ponytail: iOS has no [openCloudSocket] yet (it'd need NWConnection); the account is hidden there. */
+/** ponytail: iOS has no cloud sockets yet (it'd need NWConnection); the account is hidden there. */
 internal expect val cloudSockets: Boolean
 
 private const val APP_ID = "4920681951525131286"
@@ -140,8 +139,14 @@ internal fun usesMqtt(ver: String?): Boolean {
     return major.toInt() > 3 || (major.toInt() == 3 && minor.toInt() >= 2)
 }
 
+internal fun CloudAc.matchesReply(reply: JsonObject): Boolean {
+    // Some V3.2 modules send their internal ID in "mac" and the cloud MAC in "cid".
+    val ids = listOfNotNull(reply.str("mac"), reply.str("sub"), reply.str("cid"))
+    return ids.isEmpty() || ids.any { it.equals(mac, ignoreCase = true) }
+}
+
 /** [inner] sent to the AC [mac] through the cloud; its decrypted reply ("dat" for a status, "res" for a command). */
-internal suspend fun greeCloudRequest(s: Settings, mac: String, inner: JsonObject): JsonObject {
+internal suspend fun greeCloudRequest(s: Settings, mac: String, inner: JsonObject, isCurrent: () -> Boolean): JsonObject {
     val account = greeAccount(s) ?: throw AcUnreachable()
     val ac = account.ac(mac) ?: throw AcUnreachable()
     val want = if (inner.str("t") == "status") "dat" else "res"
@@ -151,13 +156,23 @@ internal suspend fun greeCloudRequest(s: Settings, mac: String, inner: JsonObjec
     }.toString()
     fun open(reply: String?) = reply?.let { runCatching { Json.parseToJsonElement(it).jsonObject.str("pack") }.getOrNull() }
         ?.let { runCatching { Json.parseToJsonElement(greeDecrypt(it, ac.key)).jsonObject }.getOrNull() }
-        ?.takeIf { it.str("t") == want && (it.str("mac") ?: ac.mac).equals(ac.mac, ignoreCase = true) }
-    val mqtt = suspend { withContext(Dispatchers.IO) { mqttExchange(s, account, ac, envelope(Random.nextLong(1_000_000_000, 10_000_000_000).toString()), ::open) } }
-    val gateway = suspend { gatewayServer(account, ac)?.let { (host, port, tls) -> open(withContext(Dispatchers.IO) { lineExchange(host, port, tls, envelope("app")) }) } }
+        ?.takeIf { it.str("t") == want && ac.matchesReply(it) }
+    val mqtt = suspend {
+        val cid = Random.nextLong(1_000_000_000, 10_000_000_000).toString()
+        mqttExchange(s, account, ac, envelope(cid), isCurrent, ::open)
+    }
+    val gateway = suspend {
+        gatewayServer(account, ac)?.let { (host, port, tls) -> open(lineExchange(host, port, tls, envelope("app"), isCurrent)) }
+    }
     // The reference client tries the other way too when the first doesn't answer.
     val ways = if (usesMqtt(ac.ver)) listOf("MQTT" to mqtt, "gateway" to gateway) else listOf("gateway" to gateway, "MQTT" to mqtt)
     for ((name, way) in ways) {
-        val reply = runCatching { way() }.onFailure { log("Gree cloud $name failed", it) }.getOrNull()
+        currentCoroutineContext().ensureActive()
+        if (!isCurrent()) throw AcUnreachable()
+        val reply = attempt { way() }.onFailure {
+            currentCoroutineContext().ensureActive()
+            log("Gree cloud $name failed", it)
+        }.getOrNull()
         if (reply != null) return reply
     }
     throw AcUnreachable()
@@ -174,9 +189,9 @@ private suspend fun gatewayServer(account: GreeAccount, ac: CloudAc): Triple<Str
 }
 
 /** One newline-terminated JSON line out, one back. */
-private fun lineExchange(host: String, port: Int, tls: Boolean, message: String): String? {
-    val socket = openCloudSocket(host, port, tls) ?: return null
-    try {
+internal suspend fun lineExchange(host: String, port: Int, tls: Boolean, message: String, isCurrent: () -> Boolean): String? =
+    withCloudSocket(host, port, tls) { socket ->
+        if (!isCurrent()) throw AcUnreachable()
         socket.write((message + "\n").encodeToByteArray())
         val line = ArrayList<Byte>()
         while (true) {
@@ -184,11 +199,8 @@ private fun lineExchange(host: String, port: Int, tls: Boolean, message: String)
             if (b == -1 || b == '\n'.code) break
             line += b.toByte()
         }
-        return line.toByteArray().decodeToString().ifBlank { null }
-    } finally {
-        socket.close()
+        line.toByteArray().decodeToString().ifBlank { null }
     }
-}
 
 // ---------- MQTT 3.1.1: just enough for one request and its reply ----------
 
@@ -235,9 +247,12 @@ private fun CloudSocket.readPacket(): Pair<Int, ByteArray> {
 }
 
 /** Publishes [message] for [ac]'s module and returns the first reply on its response topic that [accept]s, within 10 s. */
-private fun <T> mqttExchange(s: Settings, account: GreeAccount, ac: CloudAc, message: String, accept: (String) -> T?): T? {
-    val socket = openCloudSocket(if (account.region.isEmpty()) "mqtt.gree.com" else "mqtt-${account.region}.gree.com", 1984, tls = true) ?: return null
-    try {
+private suspend fun <T> mqttExchange(
+    s: Settings, account: GreeAccount, ac: CloudAc, message: String, isCurrent: () -> Boolean, accept: (String) -> T?,
+): T? {
+    val host = if (account.region.isEmpty()) "mqtt.gree.com" else "mqtt-${account.region}.gree.com"
+    val response = "response/${ac.module}"
+    return withCloudSocket(host, 1984, tls = true) { socket ->
         socket.write(mqttConnect("app_" + Random.nextLong().toULong().toString(16).padStart(16, '0'), account.uid.content, account.token))
         val (type, ack) = socket.readPacket()
         if (type != 0x20 || ack.size < 2) throw AcUnreachable()
@@ -247,7 +262,8 @@ private fun <T> mqttExchange(s: Settings, account: GreeAccount, ac: CloudAc, mes
             throw AcUnreachable()
         }
         if (ack[1].toInt() != 0) throw AcUnreachable()
-        socket.write(mqttPacket(0x82, byteArrayOf(0, 1) + mqttString("response/${ac.module}/#") + byteArrayOf(1)))
+        socket.write(mqttPacket(0x82, byteArrayOf(0, 1) + mqttString("$response/#") + byteArrayOf(1)))
+        if (!isCurrent()) throw AcUnreachable()
         socket.write(mqttPacket(0x32, mqttString("request/${ac.module}") + byteArrayOf(0, 2) + message.encodeToByteArray()))
         val deadline = TimeSource.Monotonic.markNow() + 10.seconds
         while (deadline.hasNotPassedNow()) {
@@ -258,11 +274,10 @@ private fun <T> mqttExchange(s: Settings, account: GreeAccount, ac: CloudAc, mes
                 socket.write(byteArrayOf(0x40, 2, body[2 + topicLength], body[3 + topicLength]))
             }
             val (topic, payload) = mqttPublished(header, body)
-            if (topic.startsWith("response/")) accept(payload.decodeToString())?.let { return it }
+            if (topic == response || topic.startsWith("$response/")) {
+                accept(payload.decodeToString())?.let { return@withCloudSocket it }
+            }
         }
-        return null
-    } finally {
-        runCatching { socket.write(byteArrayOf(0xE0.toByte(), 0)) } // DISCONNECT
-        socket.close()
+        null
     }
 }

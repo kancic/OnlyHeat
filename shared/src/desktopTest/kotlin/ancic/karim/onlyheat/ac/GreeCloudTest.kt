@@ -1,14 +1,24 @@
 package ancic.karim.onlyheat.ac
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.net.InetAddress
+import java.net.ServerSocket
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
 
 /** Expected digests from Python's hashlib, as the reference client computes them. */
 class GreeCloudTest {
@@ -70,5 +80,55 @@ class GreeCloudTest {
         val cloud = ac.throughCloud()
         assertTrue(cloud.viaCloud && !ac.viaCloud)
         assertEquals(ac, cloud) // the isCurrent checks compare against the stored pairing
+    }
+
+    @Test
+    fun cloudCidCanIdentifyAReplyWithAnInternalMac() {
+        val ac = CloudAc("7cb8e6440000", "7cb8e6440000", "k", "V3.2.M")
+        fun matches(reply: String) = ac.matchesReply(Json.parseToJsonElement(reply).jsonObject)
+
+        assertTrue(matches("""{"mac":"000000221859","cid":"7CB8E6440000"}"""))
+        assertTrue(matches("""{"mac":"7cb8e6440000","cid":"1234567890"}"""))
+        assertTrue(matches("""{"cid":"7cb8e6440000"}"""))
+        assertTrue(matches("""{"t":"res"}"""))
+        assertFalse(matches("""{"mac":"7cb8e6440001","cid":"7cb8e6440001"}"""))
+        assertFalse(matches("""{"cid":"7cb8e6440001"}"""))
+    }
+
+    @Test
+    fun gatewayChecksPairingBeforeWriting() = runBlocking {
+        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
+            val received = async(Dispatchers.IO) {
+                server.soTimeout = 3_000
+                server.accept().use { peer ->
+                    peer.soTimeout = 3_000
+                    peer.getInputStream().read()
+                }
+            }
+            assertFailsWith<AcUnreachable> {
+                lineExchange(server.inetAddress.hostAddress, server.localPort, false, "command") { false }
+            }
+            assertEquals(-1, received.await())
+        }
+    }
+
+    @Test
+    fun cancellingAStalledExchangeClosesItsSocket() = runBlocking {
+        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
+            val reply = async {
+                lineExchange(server.inetAddress.hostAddress, server.localPort, false, "command") { true }
+            }
+            val peer = async(Dispatchers.IO) {
+                server.soTimeout = 3_000
+                server.accept()
+            }.await()
+            peer.use {
+                peer.soTimeout = 3_000
+                val input = peer.getInputStream().bufferedReader()
+                assertEquals("command", input.readLine())
+                withTimeout(3.seconds) { reply.cancelAndJoin() }
+                assertEquals(null, input.readLine())
+            }
+        }
     }
 }

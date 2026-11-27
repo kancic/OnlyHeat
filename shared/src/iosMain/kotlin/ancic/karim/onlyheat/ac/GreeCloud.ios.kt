@@ -11,4 +11,6 @@ internal actual fun md5(data: ByteArray): ByteArray {
 
 internal actual val cloudSockets = false
 
-internal actual fun openCloudSocket(host: String, port: Int, tls: Boolean): CloudSocket? = null
+internal actual suspend fun <T> withCloudSocket(
+    host: String, port: Int, tls: Boolean, exchange: (CloudSocket) -> T,
+): T? = null

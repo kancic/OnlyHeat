@@ -12,7 +12,10 @@ import io.ktor.utils.io.core.readText
 import io.ktor.utils.io.core.writeText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.io.IOException
 import kotlinx.serialization.json.*
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
@@ -82,8 +85,12 @@ internal object Gree : AcProtocol {
     ): JsonObject {
         val message = packFor(mac, pack, key)
         repeat(2) {
-            val reply = udpExchange(listOf(host), PORT, message, 2.seconds, first = true, isCurrent = isCurrent)
-                .firstOrNull()?.second
+            val reply = try {
+                udpExchange(listOf(host), PORT, message, 2.seconds, first = true, isCurrent = isCurrent).firstOrNull()?.second
+            } catch (e: IOException) {
+                currentCoroutineContext().ensureActive()
+                throw AcUnreachable(cause = e)
+            }
             reply?.let { unpack(it, key) }?.let { return it }
         }
         throw AcUnreachable()
@@ -91,7 +98,7 @@ internal object Gree : AcProtocol {
 
     /** [ac] on the home network, or through the Gree+ account once [withAc] gave up on that. */
     private suspend fun request(ac: LinkedAc, pack: JsonObject, isCurrent: () -> Boolean = { true }): JsonObject =
-        if (ac.viaCloud) greeCloudRequest(cloudSettings, ac.mac, pack) else request(ac.host, ac.mac, ac.secret, pack, isCurrent)
+        if (ac.viaCloud) greeCloudRequest(cloudSettings, ac.mac, pack, isCurrent) else request(ac.host, ac.mac, ac.secret, pack, isCurrent)
 
     private val cloudSettings by lazy { Settings() }
 

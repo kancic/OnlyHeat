@@ -128,6 +128,25 @@ class AcTest {
     }
 
     @Test
+    fun cloudFallbackAfterAnUnansweredScanHit() = runTest {
+        withSettings { s ->
+            val moved = ac.asFound().copy(host = "192.168.100.54")
+            for (found in listOf(ac.asFound(), moved)) {
+                s.linkAc("first", "r1", ac)
+                val lanHosts = mutableListOf<String>()
+                val used = s.withAc("first", "r1", ac.id, scan = { listOf(found) }, canUseCloud = { true }) {
+                    if (it.viaCloud) it else {
+                        lanHosts += it.host
+                        throw AcUnreachable()
+                    }
+                }
+                assertEquals(listOf(ac.host, found.host).distinct(), lanHosts)
+                assertEquals(used, s.linkedAc("first", "r1"))
+            }
+        }
+    }
+
+    @Test
     fun commandSendsOnlyChangedValuesAndChecksTheResult() {
         val before = AcState(false, AcMode.Cool, 24, AcFan.Low)
         val change = before.changeTo(before.copy(power = true)) + AcChange(target = 25)

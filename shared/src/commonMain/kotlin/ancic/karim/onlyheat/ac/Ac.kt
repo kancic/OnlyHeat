@@ -116,7 +116,7 @@ internal data class LinkedAc(val protocol: String, val mac: String, val host: St
 }
 
 /** [actual]: what the AC reported when it was read back after a change it didn't confirm; null = no answer at all. */
-class AcUnreachable(val actual: AcState? = null) : Exception("air conditioner did not answer")
+class AcUnreachable(val actual: AcState? = null, cause: Throwable? = null) : Exception("air conditioner did not answer", cause)
 
 /** One brand's local protocol. To add a brand: implement this and list it in [acProtocols]. */
 internal interface AcProtocol {
@@ -209,6 +209,7 @@ internal fun Settings.clearAcLinks() = keys.filter { it.startsWith(AC_ROOM) }.fo
  *  ponytail: away from home every call waits out the LAN timeouts first; remember the last route if that's too slow. */
 internal suspend fun <T> Settings.withAc(
     key: String, roomId: String, linkId: String, scan: suspend () -> List<FoundAc> = { scanAcs() },
+    canUseCloud: (LinkedAc) -> Boolean = LinkedAc::remote,
     block: suspend (LinkedAc) -> T,
 ): T {
     val ac = linkedAc(key, roomId)?.takeIf { it.id == linkId } ?: throw AcUnreachable()
@@ -216,11 +217,16 @@ internal suspend fun <T> Settings.withAc(
         block(ac)
     } catch (e: AcUnreachable) {
         if (e.actual != null || linkedAc(key, roomId) != ac) throw e
-        val found = scan().filter { it.protocol == ac.protocol && it.mac == ac.mac }
+        val moved = scan().firstOrNull { it.protocol == ac.protocol && it.mac == ac.mac && it.host != ac.host }
         if (linkedAc(key, roomId) != ac) throw e
-        val moved = found.find { it.host != ac.host }
-            ?: return if (found.isEmpty() && ac.remote()) block(ac.throughCloud()) else throw e
-        ac.copy(host = moved.host).also { linkAc(key, roomId, it) }.let { block(it) }
+        val local = if (moved == null) ac else ac.copy(host = moved.host).also { linkAc(key, roomId, it) }
+        val failure = if (moved == null) e else try {
+            return block(local)
+        } catch (retry: AcUnreachable) {
+            retry
+        }
+        if (failure.actual != null || linkedAc(key, roomId) != local || !canUseCloud(local)) throw failure
+        block(local.throughCloud())
     }
 }
 
