@@ -48,6 +48,7 @@ Signing needs the `KEYSTORE_BASE64` / `KEYSTORE_PASSWORD` secrets; locally, `onl
 - `docs/` – write-ups of the reverse-engineered APIs, one file per firmware / app version:
   - [`dashboard-api-1.0.7.0.8.md`](docs/dashboard-api-1.0.7.0.8.md), [`dashboard-api-1.0.9.2.0.md`](docs/dashboard-api-1.0.9.2.0.md) – the controller's local web dashboard
   - [`cloud-api-1.0.3.md`](docs/cloud-api-1.0.3.md) – the cloud API used by the official TTO Advance app 1.0.3
+  - [`gree-cloud-api-1.27.3.3.md`](docs/gree-cloud-api-1.27.3.3.md) – the Gree+ / EWPE Smart cloud (account, MQTT and gateway) as of Gree+ 1.27.3.3
 
 The raw captures the docs refer to (`docs/*-snapshot-*/`) are vendor code and are kept out of the repository.
 
