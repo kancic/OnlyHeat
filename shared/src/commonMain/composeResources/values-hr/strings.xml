@@ -197,6 +197,8 @@
     <string name="tour_away">Odsutnost snižava zadane temperature dok vas nema. Ako je grijanje u sobi već isključeno, tako i ostaje. Sobe s rasporedom mogu zadržati trenutačnu zadanu temperaturu. „Natrag sam” vraća prethodne zadane temperature.</string>
     <string name="tour_ac_title">I klima je ovdje</string>
     <string name="tour_ac">Soba s klimom prikazuje grijanje i klimu u dva reda. Dodirnite naziv klime za način rada i ventilator. Snijeg znači da klima hladi; toplo i hladno koji se guraju znače da pod grije dok klima hladi, što troši energiju, pa smanjite jedno od njih.</string>
+    <string name="tour_ac_cloud_title">Upravljajte klimom i izvan kuće</string>
+    <string name="tour_ac_cloud">Otvorite kontrole klime i povežite račun koji koristite za svoju klimu. Kad klima nije dostupna preko kućne mreže, OnlyHeat njome može upravljati putem interneta.</string>
     <string name="tour_cards_title">Što pokazuju kartice</string>
     <string name="tour_cards">Slika na kartici pokazuje stanje sobe. Inje se pojavljuje kad je temperatura sobe ispod praga za upozorenje na hladnoću.</string>
     <string name="state_heating">Grije sada</string>

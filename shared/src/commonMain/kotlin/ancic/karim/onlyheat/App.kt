@@ -345,7 +345,9 @@ private fun MainTabs(
             tabStates.SaveableStateProvider(displayedTab.name) {
                 when (displayedTab) {
                     Tab.Rooms -> {
-                        if (tab == Tab.Rooms && !scheduleTipOpen) RoomsTip(hasAc = acs.linked.isNotEmpty())
+                        if (tab == Tab.Rooms && !scheduleTipOpen) {
+                            RoomsTip(hasAc = acs.linked.isNotEmpty(), cloudAvailable = acs.cloudAvailable)
+                        }
                         RoomsTab(model, acs, discoverAc, onScheduleLocked) { open(Screen.RoomDetail(it)) }
                     }
                     Tab.History -> HistoryTab(history, model.home?.rooms) { open(Screen.RoomDetail(it)) }

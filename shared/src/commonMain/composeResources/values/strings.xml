@@ -196,6 +196,8 @@
     <string name="tour_away">Away lowers room temperatures while you’re gone. Rooms that are off stay off, and rooms on a schedule may keep their current targets. “I’m back” restores the previous targets.</string>
     <string name="tour_ac_title">Your air conditioner, here too</string>
     <string name="tour_ac">Each room with an AC shows heating and AC as two rows. Tap the AC’s name for mode and fan. Snow means the AC is cooling; warm and cool pushing at each other means the floor heats while the AC cools, wasting energy, so lower one of them.</string>
+    <string name="tour_ac_cloud_title">Control your AC away from home</string>
+    <string name="tour_ac_cloud">Open your AC controls and connect the account you use for your air conditioner. OnlyHeat can then control it over the internet when it can’t reach it on your home network.</string>
     <string name="tour_cards_title">What the cards show</string>
     <string name="tour_cards">Each card’s picture tells you how the room is doing. Frost appears when the room temperature is below your cold-alert threshold.</string>
     <string name="state_heating">Heating now</string>

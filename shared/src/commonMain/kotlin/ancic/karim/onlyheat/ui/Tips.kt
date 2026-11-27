@@ -139,10 +139,10 @@ private fun cycle(count: Int, ms: Long = 2_200): Int {
 
 /**
  * The welcome tour, on the Rooms tab right after the first login: what isn't obvious from the cards themselves.
- * The AC page joins once [hasAc] (an AC is linked to a room), so people without one never see it.
+ * The AC pages join once [hasAc] (an AC is linked to a room). The cloud page needs platform support too.
  */
 @Composable
-internal fun RoomsTip(hasAc: Boolean) = FirstTimeTip(
+internal fun RoomsTip(hasAc: Boolean, cloudAvailable: Boolean) = FirstTimeTip(
     // The card pictures carry meaning; nobody guesses that frost means "below your cold alert".
     TipPage("room-card-pictures", Res.string.tour_cards_title, Res.string.tour_cards) {
         val state = cycle(4)
@@ -159,7 +159,19 @@ internal fun RoomsTip(hasAc: Boolean) = FirstTimeTip(
         }
     },
     TipPage("away", Res.string.tour_away_title, Res.string.tour_away) { AwayScene() },
-    *listOfNotNull(if (hasAc) TipPage("ac", Res.string.tour_ac_title, Res.string.tour_ac) { AcScene() } else null).toTypedArray(),
+    *listOfNotNull(
+        if (hasAc) TipPage("ac", Res.string.tour_ac_title, Res.string.tour_ac) { AcScene() } else null,
+        if (hasAc && cloudAvailable) TipPage("ac-cloud", Res.string.tour_ac_cloud_title, Res.string.tour_ac_cloud) {
+            val colors = MaterialTheme.colorScheme
+            Scene(colors.tertiaryContainer, colors.onTertiaryContainer) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(CloudIcon, null, Modifier.size(48.dp))
+                    HorizontalDivider(Modifier.width(24.dp), color = LocalContentColor.current)
+                    Icon(AcIcon, null, Modifier.size(48.dp))
+                }
+            }
+        } else null,
+    ).toTypedArray(),
 )
 
 /** The AC row's pictures: flames while heating, snow while the AC cools, and the tug of war when both run at once. */
