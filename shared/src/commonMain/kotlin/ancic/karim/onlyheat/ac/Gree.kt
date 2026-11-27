@@ -2,6 +2,7 @@ package ancic.karim.onlyheat.ac
 
 import ancic.karim.onlyheat.data.log
 import ancic.karim.onlyheat.data.str
+import com.russhwolf.settings.Settings
 import io.ktor.network.selector.SelectorManager
 import io.ktor.network.sockets.Datagram
 import io.ktor.network.sockets.InetSocketAddress
@@ -88,6 +89,14 @@ internal object Gree : AcProtocol {
         throw AcUnreachable()
     }
 
+    /** [ac] on the home network, or through the Gree+ account once [withAc] gave up on that. */
+    private suspend fun request(ac: LinkedAc, pack: JsonObject, isCurrent: () -> Boolean = { true }): JsonObject =
+        if (ac.viaCloud) greeCloudRequest(cloudSettings, ac.mac, pack) else request(ac.host, ac.mac, ac.secret, pack, isCurrent)
+
+    private val cloudSettings by lazy { Settings() }
+
+    override fun remote(ac: LinkedAc) = cloudSockets && greeAccount(cloudSettings)?.ac(ac.mac) != null
+
     private val logged = mutableSetOf<String>()
 
     // Asks each address directly: some units ignore broadcast scans.
@@ -138,7 +147,7 @@ internal object Gree : AcProtocol {
     }
 
     override suspend fun status(ac: LinkedAc): AcState {
-        val r = request(ac.host, ac.mac, ac.secret, buildJsonObject {
+        val r = request(ac, buildJsonObject {
             put("t", "status"); put("mac", ac.mac); putJsonArray("cols") { listOf("Pow", "Mod", "SetTem", "WdSpd").forEach { add(it) } }
         })
         // An odd reply counts as no reply, so withAc and apply's read-back still recover.
@@ -176,7 +185,7 @@ internal object Gree : AcProtocol {
 
     override suspend fun apply(ac: LinkedAc, change: AcChange, isCurrent: () -> Boolean) {
         val values = commandValues(change)
-        val reply = request(ac.host, ac.mac, ac.secret, buildJsonObject {
+        val reply = request(ac, buildJsonObject {
             put("t", "cmd")
             putJsonArray("opt") { values.keys.forEach { add(it) } }
             putJsonArray("p") { values.values.forEach { add(it) } }

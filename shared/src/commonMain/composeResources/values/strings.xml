@@ -257,6 +257,15 @@
     <string name="ac_heating_off">Turn heating off</string>
     <string name="ac_remove">Remove from this room</string>
     <string name="ac_pill_away">Not home</string>
+    <string name="ac_cloud_offer">Sign in with your Gree+ or EWPE Smart account to control it away from home.</string>
+    <string name="ac_cloud_sign_in">Sign in</string>
+    <string name="ac_cloud_title">Gree+ / EWPE Smart</string>
+    <string name="ac_cloud_hint">The air conditioner has to be added in that app. Your password isn’t saved.</string>
+    <string name="ac_cloud_email">Email</string>
+    <string name="ac_cloud_password">Password</string>
+    <string name="ac_cloud_failed">Couldn’t sign in. Check the email and password.</string>
+    <string name="ac_cloud_none">Signed in, but none of your paired air conditioners are in that account.</string>
+    <string name="ac_cloud_sign_out">Sign out of Gree+ (%1$s)</string>
     <string name="heating_title">Floor</string>
     <string name="ac_header_off">AC off</string>
     <string name="ac_header_heating">AC heating</string>

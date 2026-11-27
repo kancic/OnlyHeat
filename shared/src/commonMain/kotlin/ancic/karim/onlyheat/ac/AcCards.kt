@@ -341,6 +341,7 @@ internal fun AcRow(ac: AcView, conflict: Boolean, onChange: (AcChange) -> Unit, 
 @Composable
 internal fun AcSheet(
     room: Room, ac: AcView, onChange: (AcChange) -> Unit, onRemove: () -> Unit, onDismiss: () -> Unit,
+    account: @Composable () -> Unit = {}, // [AcCloudAccount]
     warning: @Composable () -> Unit = {}, // the fight card, so a change made here that starts a fight says so
 ) {
     ModalBottomSheet(onDismiss) {
@@ -363,6 +364,7 @@ internal fun AcSheet(
                 AcPower(ac, onChange)
             }
             ac.state?.let { AcControls(it, onChange) }
+            account()
             AcRemove(onRemove)
         }
     }
@@ -370,13 +372,14 @@ internal fun AcSheet(
 
 /** The same controls as a Settings card on the room's detail screen, tinted while the AC is on. */
 @Composable
-internal fun AcCard(ac: AcView, onChange: (AcChange) -> Unit, onRemove: () -> Unit) {
+internal fun AcCard(ac: AcView, onChange: (AcChange) -> Unit, onRemove: () -> Unit, account: @Composable () -> Unit = {}) {
     val state = ac.state
     Section(
         stringResource(Res.string.ac_title), acText(state, ac.loaded), acIcon(state), MaterialShapes.Cookie9Sided, accent = 2,
         container = if (state?.power == true) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
         below = {
             state?.let { AcControls(it, onChange) }
+            account()
             AcRemove(onRemove) // also while the AC can't be reached
         },
     ) { AcPower(ac, onChange) }
@@ -386,6 +389,73 @@ internal fun AcCard(ac: AcView, onChange: (AcChange) -> Unit, onRemove: () -> Un
 private fun AcPower(ac: AcView, onChange: (AcChange) -> Unit) {
     if (ac.state != null) Switch(ac.state.power, { onChange(AcChange(power = it)) })
     else if (!ac.loaded) LoadingIndicator(Modifier.size(32.dp))
+}
+
+/** Away from home: an offer to sign in to the AC's Gree+ / EWPE Smart account, which reaches it through Gree's cloud.
+ *  Signed in: a quiet way out, like [AcRemove]. */
+@Composable
+internal fun AcCloudAccount(acs: AcViewModel, ac: AcView) {
+    if (!acs.cloudAvailable) return
+    var asking by remember { mutableStateOf(false) }
+    if (asking) CloudDialog({ asking = false }) { user, password -> asking = false; acs.cloudSignIn(user, password) }
+    val user = acs.cloudUser
+    if (user != null) TextButton(
+        acs::cloudSignOut, shapes = ButtonDefaults.shapes(),
+        colors = ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current), modifier = Modifier.offset(x = (-16).dp),
+    ) { Text(stringResource(Res.string.ac_cloud_sign_out, user)) }
+    else if (ac.loaded && ac.state == null) Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(Res.string.ac_cloud_offer), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.width(12.dp))
+        if (acs.signingIn) LoadingIndicator(Modifier.size(40.dp))
+        else FilledTonalButton({ asking = true }, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) {
+            Text(stringResource(Res.string.ac_cloud_sign_in))
+        }
+    }
+}
+
+@Composable
+private fun CloudDialog(onDismiss: () -> Unit, onSignIn: (user: String, password: String) -> Unit) {
+    var user by rememberSaveable { mutableStateOf("") }
+    val password = remember { TextFieldState() }
+    var showPassword by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(AcIcon, contentDescription = null) },
+        title = { Text(stringResource(Res.string.ac_cloud_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(Res.string.ac_cloud_hint))
+                OutlinedTextField(
+                    user, { user = it }, Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text(stringResource(Res.string.ac_cloud_email)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
+                )
+                OutlinedSecureTextField( // like the Wi-Fi password
+                    password, Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(Res.string.ac_cloud_password)) },
+                    textObfuscationMode = if (showPassword) TextObfuscationMode.Visible else TextObfuscationMode.RevealLastTyped,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                    trailingIcon = {
+                        IconButton({ showPassword = !showPassword }, shapes = IconButtonDefaults.shapes()) {
+                            Icon(
+                                if (showPassword) VisibilityOffIcon else VisibilityIcon,
+                                stringResource(if (showPassword) Res.string.ac_wifi_hide_password else Res.string.ac_wifi_show_password),
+                            )
+                        }
+                    },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                { onSignIn(user, password.text.toString()) }, enabled = user.isNotBlank() && password.text.isNotEmpty(),
+                shapes = ButtonDefaults.shapes(),
+            ) { Text(stringResource(Res.string.ac_cloud_sign_in)) }
+        },
+        dismissButton = {
+            TextButton(onDismiss, shapes = ButtonDefaults.shapes()) { Text(stringResource(Res.string.cancel)) }
+        },
+    )
 }
 
 /** Rarely used, so a quiet text button in the card's own ink, not a tonal one like the card's actions. */

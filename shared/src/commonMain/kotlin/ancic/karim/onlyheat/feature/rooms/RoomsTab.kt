@@ -1,6 +1,7 @@
 package ancic.karim.onlyheat.feature.rooms
 
 import ancic.karim.onlyheat.ac.AcChange
+import ancic.karim.onlyheat.ac.AcCloudAccount
 import ancic.karim.onlyheat.ac.AcViewModel
 import ancic.karim.onlyheat.ac.AcRow
 import ancic.karim.onlyheat.ac.AcSheet
@@ -282,6 +283,7 @@ internal fun RoomsTab(
         sheetRoom, sheetAc, { acs.set(sheetRoom.id, it) },
         onRemove = { acs.unlink(sheetRoom.id); acSheet = null },
         onDismiss = { acSheet = null },
+        account = { AcCloudAccount(acs, sheetAc) },
     ) {
         if (fighting(sheetRoom, sheetAc.state)) AcFightCard(sheetRoom, model.outside, { acs.set(sheetRoom.id, it) }, Modifier.padding(bottom = 8.dp), acs.busy(sheetRoom.id)) {
             model.heatingOff(sheetRoom, onScheduleLocked)

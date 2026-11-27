@@ -126,6 +126,7 @@ internal class AcViewModel(private val settings: Settings, private val key: Stri
             }
         }
         linked = settings.linkedAcs(key) // an address may have moved
+        cloudUser = greeAccount(settings)?.user // a refused token signs out
     }
 
     fun assign(ac: FoundAc, room: Room) = viewModelScope.launch {
@@ -170,6 +171,32 @@ internal class AcViewModel(private val settings: Settings, private val key: Stri
             found -= ac
         }
         snackbar?.showSnackbar(getString(if (sent) Res.string.ac_wifi_sent else Res.string.ac_failed))
+    }
+
+    /** The Gree+ / EWPE Smart account that reaches the ACs away from home; null when signed out (or on iOS). */
+    var cloudUser by mutableStateOf(greeAccount(settings)?.user)
+        private set
+    var signingIn by mutableStateOf(false)
+        private set
+    val cloudAvailable get() = cloudSockets
+
+    fun cloudSignIn(user: String, password: String) = viewModelScope.launch {
+        if (signingIn) return@launch
+        signingIn = true
+        val ok = try {
+            attempt { greeSignIn(settings, user.trim(), password) }.onFailure { log("Gree sign-in failed", it) }.isSuccess
+        } finally {
+            signingIn = false
+        }
+        cloudUser = greeAccount(settings)?.user
+        if (!ok) snackbar?.showSnackbar(getString(Res.string.ac_cloud_failed))
+        else if (linked.values.none { it.remote() }) snackbar?.showSnackbar(getString(Res.string.ac_cloud_none))
+        else refresh(canScan = false)
+    }
+
+    fun cloudSignOut() {
+        greeSignOut(settings)
+        cloudUser = null
     }
 
     fun minimize(on: Boolean) {

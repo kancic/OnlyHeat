@@ -1,6 +1,7 @@
 package ancic.karim.onlyheat
 
 import ancic.karim.onlyheat.ac.AcCard
+import ancic.karim.onlyheat.ac.AcCloudAccount
 import ancic.karim.onlyheat.ac.AcViewModel
 import ancic.karim.onlyheat.ac.AcWifiAccess
 import ancic.karim.onlyheat.ac.LocalAcWifi
@@ -286,7 +287,7 @@ private fun Main(
                                 onSmartChanged = model::refreshRooms,
                                 ac = acs.room(room.id),
                                 acCard = { ac ->
-                                    AcCard(ac, { acs.set(room.id, it) }, onRemove = { acs.unlink(room.id) })
+                                    AcCard(ac, { acs.set(room.id, it) }, onRemove = { acs.unlink(room.id) }) { AcCloudAccount(acs, ac) }
                                 },
                                 acWarning = { ac ->
                                     if (fighting(room, ac.state)) AcFightCard(room, model.outside, { acs.set(room.id, it) }, busy = acs.busy(room.id)) {

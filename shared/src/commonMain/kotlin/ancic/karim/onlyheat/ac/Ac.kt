@@ -107,6 +107,12 @@ internal expect suspend fun exchangeOnWifi(ap: FoundAc, password: String, port: 
 internal data class LinkedAc(val protocol: String, val mac: String, val host: String, val secret: String, val id: String = Uuid.random().toString()) {
     /** Unpaired again: offered on the found card under its MAC. */
     fun asFound() = FoundAc(protocol, mac, host, mac)
+
+    /** Talk to it through its brand's cloud instead of the home network. Outside the constructor, so equality (the
+     *  isCurrent checks against the stored pairing) ignores it. */
+    var viaCloud = false
+        private set
+    fun throughCloud() = copy().also { it.viaCloud = true }
 }
 
 /** [actual]: what the AC reported when it was read back after a change it didn't confirm; null = no answer at all. */
@@ -124,6 +130,8 @@ internal interface AcProtocol {
     fun hotspot(ssid: String, bssid: String): FoundAc? = null
     /** Gives a unit that [FoundAc.needsWifi] the home Wi-Fi, joining its own Wi-Fi first when found by [hotspot]. */
     suspend fun joinWifi(found: FoundAc, ssid: String, password: String): Unit = throw AcUnreachable()
+    /** Whether [ac] can be reached away from home ([LinkedAc.throughCloud]): the user signed in to an account it's on. */
+    fun remote(ac: LinkedAc): Boolean = false
 }
 
 internal val acProtocols: List<AcProtocol> = listOf(Gree)
@@ -134,6 +142,7 @@ internal suspend fun FoundAc.joinWifi(ssid: String, password: String) = protocol
 /** The reset AC whose own Wi-Fi this is, of any brand; null for any other Wi-Fi. */
 internal fun hotspotOf(ssid: String, bssid: String) = acProtocols.firstNotNullOfOrNull { it.hotspot(ssid, bssid) }
 internal suspend fun LinkedAc.status() = protocolOf(protocol).status(this)
+internal fun LinkedAc.remote() = acProtocols.firstOrNull { it.id == protocol }?.remote(this) == true
 internal suspend fun LinkedAc.apply(change: AcChange, isCurrent: () -> Boolean): AcState? =
     protocolOf(protocol).applyConfirmed(this, change, isCurrent)
 
@@ -196,7 +205,8 @@ internal fun Settings.linkAc(key: String, roomId: String, ac: LinkedAc?) {
 internal fun Settings.clearAcLinks() = keys.filter { it.startsWith(AC_ROOM) }.forEach(::remove)
 
 /** Runs [block] on the room's AC. If it doesn't answer, it may have a new address: look for it (a fresh scan at most
- *  every 5 min; in between, the last scan's results). */
+ *  every 5 min; in between, the last scan's results). Not on the network at all: through its brand's cloud, if signed in.
+ *  ponytail: away from home every call waits out the LAN timeouts first; remember the last route if that's too slow. */
 internal suspend fun <T> Settings.withAc(
     key: String, roomId: String, linkId: String, scan: suspend () -> List<FoundAc> = { scanAcs() },
     block: suspend (LinkedAc) -> T,
@@ -206,8 +216,10 @@ internal suspend fun <T> Settings.withAc(
         block(ac)
     } catch (e: AcUnreachable) {
         if (e.actual != null || linkedAc(key, roomId) != ac) throw e
-        val moved = scan().find { it.protocol == ac.protocol && it.mac == ac.mac && it.host != ac.host } ?: throw e
+        val found = scan().filter { it.protocol == ac.protocol && it.mac == ac.mac }
         if (linkedAc(key, roomId) != ac) throw e
+        val moved = found.find { it.host != ac.host }
+            ?: return if (found.isEmpty() && ac.remote()) block(ac.throughCloud()) else throw e
         ac.copy(host = moved.host).also { linkAc(key, roomId, it) }.let { block(it) }
     }
 }

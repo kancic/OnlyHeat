@@ -4,6 +4,7 @@ import ancic.karim.onlyheat.ac.AcState
 import ancic.karim.onlyheat.ac.LinkedAc
 import ancic.karim.onlyheat.ac.acTipState
 import ancic.karim.onlyheat.ac.clearAcLinks
+import ancic.karim.onlyheat.ac.greeSignOut
 import ancic.karim.onlyheat.ac.linkedAc
 import ancic.karim.onlyheat.res.*
 import com.russhwolf.settings.Settings
@@ -82,6 +83,7 @@ internal fun clearSession(s: Settings, key: String): Boolean {
     s.remove("authKey")
     clearSessionNotices(s)
     s.clearAcLinks()
+    greeSignOut(s) // only reached the ACs just unpaired
     return true
 }
 

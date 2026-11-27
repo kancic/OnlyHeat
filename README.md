@@ -13,7 +13,8 @@ network via the controller's local dashboard, so it keeps working when the cloud
 - History charts with outside temperature
 - Local access: finds the controller on your Wi-Fi and logs in with its API PIN
 - Background alerts for rooms that heat slowly, overheat, or have heating and AC running at the same time
-- Gree / Sinclair air conditioner control on the home network, including setting up the Wi-Fi of a reset unit
+- Gree / Sinclair air conditioner control on the home network, including setting up the Wi-Fi of a reset unit, and away
+  from home through a Gree+ / EWPE Smart account (Android and desktop)
 - Home-screen widget (Android), notices when the controller's firmware updates
 - English and Croatian
 
