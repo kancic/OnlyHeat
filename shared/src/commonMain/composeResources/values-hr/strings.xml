@@ -258,7 +258,8 @@
     <string name="ac_heating_off">Ugasi grijanje</string>
     <string name="ac_remove">Makni iz ove prostorije</string>
     <string name="ac_pill_away">Niste doma</string>
-    <string name="ac_cloud_offer">Prijavite se Gree+ ili EWPE Smart računom za upravljanje kad niste doma.</string>
+    <string name="ac_cloud_offer">Nije dostupna ovdje. Prijavite se za upravljanje preko Gree oblaka.</string>
+    <string name="ac_cloud_away">Upravljanje kad niste doma</string>
     <string name="ac_cloud_sign_in">Prijava</string>
     <string name="ac_cloud_title">Gree+ / EWPE Smart</string>
     <string name="ac_cloud_hint">Klima mora biti dodana u toj aplikaciji. Lozinka se ne sprema.</string>
@@ -266,7 +267,7 @@
     <string name="ac_cloud_password">Lozinka</string>
     <string name="ac_cloud_failed">Prijava nije uspjela. Provjerite e-poštu i lozinku.</string>
     <string name="ac_cloud_none">Prijavljeni ste, ali nijedna vaša spojena klima nije u tom računu.</string>
-    <string name="ac_cloud_sign_out">Odjava iz Gree+ (%1$s)</string>
+    <string name="ac_cloud_sign_out">Odjava</string>
     <string name="heating_title">Pod</string>
     <string name="ac_header_off">klima ugašena</string>
     <string name="ac_header_heating">klima grije</string>

@@ -11,6 +11,7 @@ import ancic.karim.onlyheat.ui.Badge
 import ancic.karim.onlyheat.ui.CardSwitch
 import ancic.karim.onlyheat.ui.ChevronRightIcon
 import ancic.karim.onlyheat.ui.CloseIcon
+import ancic.karim.onlyheat.ui.CloudIcon
 import ancic.karim.onlyheat.ui.DropIcon
 import ancic.karim.onlyheat.ui.ExpandLessIcon
 import ancic.karim.onlyheat.ui.FlameIcon
@@ -26,6 +27,7 @@ import ancic.karim.onlyheat.ui.VisibilityOffIcon
 import ancic.karim.onlyheat.ui.WarningIcon
 import ancic.karim.onlyheat.ui.onCardTonal
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -391,24 +393,35 @@ private fun AcPower(ac: AcView, onChange: (AcChange) -> Unit) {
     else if (!ac.loaded) LoadingIndicator(Modifier.size(32.dp))
 }
 
-/** Away from home: an offer to sign in to the AC's Gree+ / EWPE Smart account, which reaches it through Gree's cloud.
- *  Signed in: a quiet way out, like [AcRemove]. */
+/** The Gree+ / EWPE Smart account that reaches the AC through Gree's cloud when it isn't on the home network:
+ *  one row in the card's own ink, signed in or not, so it can be set up while still at home. */
 @Composable
 internal fun AcCloudAccount(acs: AcViewModel, ac: AcView) {
     if (!acs.cloudAvailable) return
     var asking by remember { mutableStateOf(false) }
     if (asking) CloudDialog({ asking = false }) { user, password -> asking = false; acs.cloudSignIn(user, password) }
     val user = acs.cloudUser
-    if (user != null) TextButton(
-        acs::cloudSignOut, shapes = ButtonDefaults.shapes(),
-        colors = ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current), modifier = Modifier.offset(x = (-16).dp),
-    ) { Text(stringResource(Res.string.ac_cloud_sign_out, user)) }
-    else if (ac.loaded && ac.state == null) Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(Res.string.ac_cloud_offer), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.width(12.dp))
-        if (acs.signingIn) LoadingIndicator(Modifier.size(40.dp))
-        else FilledTonalButton({ asking = true }, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) {
-            Text(stringResource(Res.string.ac_cloud_sign_in))
+    val ink = LocalContentColor.current
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), Arrangement.spacedBy(12.dp), Alignment.CenterVertically) {
+        Badge(CloudIcon, MaterialShapes.Cookie9Sided, ink = ink)
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(Res.string.ac_cloud_title), style = MaterialTheme.typography.titleSmall)
+            Text(
+                user ?: stringResource(if (ac.loaded && ac.state == null) Res.string.ac_cloud_offer else Res.string.ac_cloud_away),
+                style = MaterialTheme.typography.bodyMedium, color = ink.copy(alpha = 0.75f),
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        when {
+            acs.signingIn -> LoadingIndicator(Modifier.size(40.dp))
+            user != null -> OutlinedButton(
+                acs::cloudSignOut, shapes = ButtonDefaults.shapes(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = ink),
+                border = BorderStroke(1.dp, ink.copy(alpha = 0.4f)),
+            ) { Text(stringResource(Res.string.ac_cloud_sign_out)) }
+            else -> FilledTonalButton({ asking = true }, shapes = ButtonDefaults.shapes(), colors = onCardTonal()) {
+                Text(stringResource(Res.string.ac_cloud_sign_in))
+            }
         }
     }
 }
